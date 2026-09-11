@@ -1,0 +1,1 @@
+export default function Loading() { return <main className="estado" aria-live="polite"><span className="marca">agendaki<span>✳</span></span><h1>Consultando a agenda…</h1><p>Buscando os horários disponíveis.</p></main>; }
