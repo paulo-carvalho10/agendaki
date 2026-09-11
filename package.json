@@ -1,0 +1,44 @@
+{
+  "name": "agendaki",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port 3100",
+    "dev:demo": "tsx scripts/preview-demo.ts",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1 --port 3100",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:agenda": "vitest run tests/horarios-livres.test.ts",
+    "demo:horarios": "tsx scripts/demo-horarios.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "0.45.2",
+    "next": "15.5.25",
+    "postgres": "^3.4.9",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "server-only": "^0.0.1",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "0.31.10",
+    "embedded-postgres": "18.4.0-beta.17",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

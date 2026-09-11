@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.test-postgres/
+coverage/
+*.log
+.next/
+.next-dev/
+.sites-runtime/
+next-env.d.ts
+*.tsbuildinfo

@@ -1,0 +1,3 @@
+allowBuilds:
+  '@embedded-postgres/windows-x64': true
+  esbuild: true
