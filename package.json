@@ -10,6 +10,7 @@
     "dev": "next dev --hostname 127.0.0.1 --port 3100",
     "dev:demo": "tsx scripts/preview-demo.ts",
     "build": "next build",
+    "build:pages": "node scripts/build-pages.mjs",
     "start": "next start --hostname 127.0.0.1 --port 3100",
     "check": "tsc --noEmit",
     "test": "vitest run",
@@ -37,6 +38,7 @@
     "@types/react-dom": "^19.3.0",
     "drizzle-kit": "0.31.10",
     "embedded-postgres": "18.4.0-beta.17",
+    "esbuild": "0.25.12",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"

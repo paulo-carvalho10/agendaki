@@ -1,12 +1,18 @@
 # Agendaki
 
+## [Abrir demonstração online ↗](https://paulo-carvalho10.github.io/agendaki/)
+
+Explore os serviços, escolha uma data e selecione um horário. Abre no celular
+e no computador, sem instalar nada. A barbearia é fictícia e nenhuma reserva é gravada.
+
 Consulta de serviços e horários disponíveis para pequenos negócios, com motor de
 disponibilidade e proteção contra conflitos no PostgreSQL.
 
 **Versão 0.3.0 · em desenvolvimento.** A página pública permite escolher serviço,
 data e horário. A seleção ainda não grava reservas. Login, painel do dono e
-cancelamento serão implementados nas próximas etapas. A aplicação roda localmente;
-não há uma demonstração online publicada nesta versão.
+cancelamento serão implementados nas próximas etapas. A demonstração no GitHub Pages
+usa os mesmos componentes React e motor de disponibilidade com dados fictícios,
+renovados a cada visita. A versão Next.js com PostgreSQL pode ser executada localmente.
 
 ![Página pública da Barbearia Horizonte](docs/agenda-desktop.png)
 
@@ -16,6 +22,9 @@ Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, PostgreSQL,
 Drizzle ORM, Temporal e Vitest. A infraestrutura planejada é Neon + Vercel.
 
 ## Abrir a demonstração local
+
+Esta seção é para desenvolvimento. Para conhecer o projeto, use o botão
+[Abrir demonstração online](https://paulo-carvalho10.github.io/agendaki/).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -220,3 +229,17 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
 3. Publicação na Vercel com Neon, após configuração das contas.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
+
+## Hospedagem no GitHub Pages
+
+O Pages publica a pasta `docs/` da branch `main`. Para atualizar a demonstração:
+
+```sh
+pnpm build:pages
+```
+
+Versione os arquivos gerados de `docs/` junto com a alteração. A entrada
+`demo/main.tsx` reutiliza `AgendaPublica`; `src/agenda/dados-demo.ts`
+gera uma janela móvel de 14 dias com o motor real, sem consultar um banco.
+Os caminhos dos assets funcionam no prefixo `/agendaki/`, incluindo
+`/agendaki/barbearia-demo/`. Nenhuma credencial ou dado pessoal é publicado.

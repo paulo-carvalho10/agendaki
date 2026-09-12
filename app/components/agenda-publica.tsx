@@ -8,7 +8,7 @@ const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 function dataTexto(data: string, options: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('pt-BR', { ...options, timeZone: 'UTC' }).format(new Date(`${data}T12:00:00Z`));
 }
-export function AgendaPublica({ dados }: { dados: PaginaPublica }) {
+export function AgendaPublica({ dados, homeHref = '/' }: { dados: PaginaPublica; homeHref?: string }) {
   const inicial = dados.servicos.find((s) => s.nome === 'Corte') ?? dados.servicos[0];
   const [servicoId, setServico] = useState(inicial?.id);
   const [dia, setDia] = useState(inicial?.horarios[0]?.dataLocal ?? dados.dias[0]);
@@ -49,7 +49,7 @@ export function AgendaPublica({ dados }: { dados: PaginaPublica }) {
     if (!novo?.horarios.some((h) => h.dataLocal === dia)) setDia(novo?.horarios[0]?.dataLocal ?? dados.dias[0]);
   }
   return <div className="site">
-    <header className="topo"><a className="marca" href="/">agendaki<span aria-hidden="true">✳</span></a><span className="topo-texto">Um tempo só seu.</span>{dados.negocio.demonstracao && <span className="selo">Demonstração</span>}</header>
+    <header className="topo"><a className="marca" href={homeHref}>agendaki<span aria-hidden="true">✳</span></a><span className="topo-texto">Um tempo só seu.</span>{dados.negocio.demonstracao && <span className="selo">Demonstração</span>}</header>
     <main className="layout">
       <aside className="negocio">
         <div className="monograma" aria-hidden="true">{dados.negocio.demonstracao ? 'H' : dados.negocio.nome.slice(0, 1)}<span>{dados.negocio.demonstracao ? 'BARBEARIA' : 'AGENDA'}</span></div>
