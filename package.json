@@ -1,6 +1,6 @@
 {
   "name": "agendaki",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -18,7 +18,8 @@
     "demo:horarios": "tsx scripts/demo-horarios.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "negocio:criar": "tsx scripts/criar-negocio.ts"
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.5.1",

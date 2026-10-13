@@ -7,6 +7,7 @@ import { COOKIE_SESSAO, entrar, sair } from '../../src/auth/sessao.js';
 import { agendarPeloDono, criarBloqueio, mudarStatus, registrarLembrete, removerBloqueio,
   type PedidoBloqueio, type PedidoDoDono, type ResultadoPainel } from '../../src/painel/acoes.js';
 import type { StatusAgendamento } from '../../src/painel/agenda.js';
+import { definirServicoAtivo, salvarFuncionamento, salvarNegocio, salvarServico, type DadosServico, type DiaAberto } from '../../src/painel/configuracao.js';
 import type { ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
 import { exigirSessao } from './sessao';
 
@@ -66,5 +67,35 @@ export async function desbloquearAcao(bloqueioId: string): Promise<ResultadoPain
   const sessao = await exigirSessao();
   const resultado = await removerBloqueio(bancoServidor(), sessao.negocioId, bloqueioId);
   revalidatePath('/painel');
+  return resultado;
+}
+
+// Configurações: mudam também o que a página pública oferece.
+
+export async function salvarNegocioAcao(dados: { nome: string; telefone: string }): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await salvarNegocio(bancoServidor(), sessao.negocioId, dados);
+  revalidatePath('/painel', 'layout');
+  return resultado;
+}
+
+export async function salvarServicoAcao(dados: DadosServico): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await salvarServico(bancoServidor(), sessao.negocioId, dados);
+  revalidatePath('/painel', 'layout');
+  return resultado;
+}
+
+export async function definirServicoAtivoAcao(servicoId: string, ativo: boolean): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await definirServicoAtivo(bancoServidor(), sessao.negocioId, servicoId, ativo);
+  revalidatePath('/painel', 'layout');
+  return resultado;
+}
+
+export async function salvarFuncionamentoAcao(dias: DiaAberto[]): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await salvarFuncionamento(bancoServidor(), sessao.negocioId, dias);
+  revalidatePath('/painel', 'layout');
   return resultado;
 }

@@ -2,7 +2,8 @@
 import { useState, useTransition } from 'react';
 import type { AgendaDoDia, ItemAgenda, StatusAgendamento } from '../../src/painel/agenda.js';
 import type { PedidoBloqueio, PedidoDoDono, ResultadoPainel } from '../../src/painel/acoes.js';
-import { formatarTelefone, normalizarTelefone, type ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
+import { formatarTelefone, normalizarTelefone, reais, type ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
+import { CabecalhoPainel, type LinksPainel } from './painel-cabecalho';
 
 export type AcoesPainel = {
   mudarStatus: (agendamentoId: string, para: StatusAgendamento) => Promise<ResultadoPainel>;
@@ -18,15 +19,16 @@ type Props = {
   aoSair: () => Promise<void>;
   /** Na demonstração estática não há servidor: a troca de dia acontece na própria página. */
   aoMudarDia?: (dia: string) => void;
+  /** Endereços das abas; a demonstração estática troca os padrões. */
+  links?: LinksPainel;
 };
 
-const reais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const rotulos: Record<StatusAgendamento, string> = { confirmado: 'Confirmado', atendido: 'Atendido', faltou: 'Faltou', cancelado: 'Cancelado' };
 function dataTexto(dia: string, opcoes: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('pt-BR', { ...opcoes, timeZone: 'UTC' }).format(new Date(`${dia}T12:00:00Z`));
 }
 
-export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia }: Props) {
+export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links }: Props) {
   const [aviso, setAviso] = useState<{ tipo: 'erro' | 'ok'; texto: string } | null>(null);
   const [ocupado, iniciar] = useTransition();
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState<string | null>(null);
@@ -58,15 +60,8 @@ export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia }: Props)
   ].sort((x, y) => x.inicio.localeCompare(y.inicio));
 
   return <div className="site painel">
-    <header className="topo">
-      <a className="marca" href="/painel">agendaki<span aria-hidden="true">✳</span></a>
-      <span className="topo-texto">{nomeNegocio}</span>
-      {negocio.demonstracao && <span className="selo">Demonstração</span>}
-      <nav className="topo-links" aria-label="Conta">
-        <a href={`/${negocio.slug}`} target="_blank" rel="noopener noreferrer">Ver página de agendamento</a>
-        <form action={aoSair}><button type="submit" title={email}>Sair</button></form>
-      </nav>
-    </header>
+    <CabecalhoPainel nomeNegocio={nomeNegocio} demonstracao={negocio.demonstracao} email={email} aba="agenda" aoSair={aoSair}
+      links={links ?? { inicio: '/painel', agenda: '/painel', configuracoes: '/painel/configuracoes', paginaPublica: `/${negocio.slug}` }} />
     <main className="painel-layout">
       <section className="painel-dia" aria-labelledby="dia-titulo">
         <div className="dia-navegacao">
@@ -113,7 +108,7 @@ export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia }: Props)
           aoBloquear={(pedido) => executar(() => acoes.bloquear(pedido), 'Horário bloqueado.')} />
       </aside>
     </main>
-    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.5.0</span></footer>
+    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.6.0</span></footer>
   </div>;
 }
 
@@ -191,7 +186,7 @@ function NovoAgendamento({ dados, hora, acoes, aoAvisar }: {
       try {
         const resultado = await acoes.agendar({ servicoId, inicio, nome, telefone });
         aoAvisar(resultado.ok
-          ? { tipo: 'ok', texto: `${resultado.cliente.nome} marcado às ${hora(resultado.inicio)}.` }
+          ? { tipo: 'ok', texto: `Horário de ${resultado.cliente.nome} marcado para as ${hora(resultado.inicio)}.` }
           : { tipo: 'erro', texto: resultado.motivo === 'dados_invalidos' ? 'Confira o nome. O telefone é opcional, mas se preencher precisa ter DDD.' : resultado.mensagem });
       } catch { aoAvisar({ tipo: 'erro', texto: 'Não foi possível agendar agora. Tente de novo.' }); }
     });
