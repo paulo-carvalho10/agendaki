@@ -3,6 +3,7 @@ import { and, asc, eq, gt, lt, ne } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema.js';
 import { calcularHorariosLivres } from './horarios-livres.js';
+import { PASSO_GRADE_MIN } from './pedido-reserva.js';
 
 export async function obterPaginaPublica(db: PostgresJsDatabase<typeof schema>, slug: string, agora = new Date()) {
   return db.transaction(async (tx) => {
@@ -36,7 +37,7 @@ export async function obterPaginaPublica(db: PostgresJsDatabase<typeof schema>, 
       negocio, funcionamento, dias, atualizadoEm: agora.toISOString(),
       servicos: servicos.map((servico) => ({ ...servico,
         horarios: calcularHorariosLivres({ fuso: negocio.fuso, dataInicialLocal: hoje.toString(), quantidadeDias: 14,
-          duracaoServicoMin: servico.duracaoMin, passoMin: 30, funcionamento,
+          duracaoServicoMin: servico.duracaoMin, passoMin: PASSO_GRADE_MIN, funcionamento,
           bloqueios: bloqueios.map(converter), agendamentosOcupados: ocupados.map(converter), agoraUTC: agora.toISOString(),
         }).map((h) => ({ ...h, dataLocal: Temporal.Instant.from(h.inicio).toZonedDateTimeISO(negocio.fuso).toPlainDate().toString() })),
       })),
