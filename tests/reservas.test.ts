@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { obterPaginaPublica } from '../src/agenda/pagina-publica.js';
 import { hashToken, reservarHorario } from '../src/agenda/reservar.js';
-import { cancelarPorToken, obterAgendamentoPorToken } from '../src/agenda/cancelar.js';
+import { cancelarPorToken, limiteCancelamento, obterAgendamentoPorToken } from '../src/agenda/cancelar.js';
 import type { PedidoReserva, ReservaConfirmada } from '../src/agenda/pedido-reserva.js';
 import { iniciarBancoTemporario } from './banco-temporario.js';
 
@@ -152,6 +152,19 @@ test('cancelar libera o horário e não se repete', async () => {
   const pagina = await obterPaginaPublica(banco.db, slug, AGORA);
   expect(pagina!.servicos[0].horarios.some((h) => h.inicio === NOVE)).toBe(true);
   expect(await reservar({ telefone: '(34) 95555-0001' })).toMatchObject({ ok: true });
+});
+
+test('só cancela com pelo menos uma hora de antecedência', async () => {
+  const r = await reservar() as ReservaConfirmada; // começa às 12:00Z
+  const tentar = (agora: string) => cancelarPorToken(banco.db, r.tokenCancelamento, new Date(agora));
+  // Faltando 59 minutos e 59 segundos, 1 minuto e nada: fora do prazo.
+  expect(await tentar('2030-01-07T11:00:01Z')).toEqual({ ok: false, motivo: 'prazo_encerrado' });
+  expect(await tentar('2030-01-07T11:59:00Z')).toEqual({ ok: false, motivo: 'prazo_encerrado' });
+  expect((await agendamentos())[0].status).toBe('confirmado');
+  expect(limiteCancelamento(new Date(r.inicio)).toISOString()).toBe('2030-01-07T11:00:00.000Z');
+  // Faltando exatamente uma hora ainda vale.
+  expect(await tentar('2030-01-07T11:00:00Z')).toEqual({ ok: true });
+  expect((await agendamentos())[0].status).toBe('cancelado');
 });
 
 test('não cancela o que já começou nem o que o dono já encerrou', async () => {

@@ -60,7 +60,7 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 - Limite de duas reservas futuras por telefone em cada negócio e campo-isca
   contra robôs, sem captcha.
 - Tela de confirmação com a mensagem pronta para o WhatsApp do negócio.
-- Cancelamento pelo cliente em `/cancelar/[token]`: o horário volta a ficar livre.
+- Cancelamento pelo cliente em `/cancelar/[token]`, até uma hora antes: o horário volta a ficar livre.
 
 ## Rodar os testes
 
@@ -232,15 +232,17 @@ por IP nem verificação do número, que ficam para a publicação.
 confirmação traz um botão que abre o WhatsApp do negócio com a mensagem pronta.
 No negócio de demonstração a mensagem é só exibida.
 
-**Cancelar.** O cliente cancela pelo link até o início do horário. Reservas
-já atendidas ou marcadas como falta não podem ser canceladas por ele. Para
-remarcar, cancela e escolhe outro horário.
+**Cancelar.** O cliente cancela pelo link até uma hora antes do horário
+(`ANTECEDENCIA_CANCELAMENTO_MIN`), para o negócio ainda ter tempo de ocupar a
+vaga. Depois disso a página explica que o prazo terminou e oferece avisar o
+negócio pelo WhatsApp. Reservas já atendidas ou marcadas como falta não podem
+ser canceladas por ele. Para remarcar, cancela e escolhe outro horário.
 
 ## Validação desta etapa
 
-79 testes: 43 do motor, 2 dos dados de demonstração, 6 da validação do
-pedido e 28 de integração com PostgreSQL real (17 das garantias do banco e da
-página pública, 11 de reserva e cancelamento).
+80 testes: 43 do motor, 2 dos dados de demonstração, 6 da validação do
+pedido e 29 de integração com PostgreSQL real (17 das garantias do banco e da
+página pública, 12 de reserva e cancelamento).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -260,7 +262,8 @@ tem repetição limitada para lidar com arquivos que o Windows ainda está liber
 Os testes de reserva cobrem gravação, privacidade da página pública, dados
 inválidos, serviço inativo ou de outro negócio, horários que o motor não
 ofereceria, sobreposição parcial, bloqueio, cinco pedidos simultâneos para o
-mesmo horário (exatamente um vence), limite por telefone e cancelamento.
+mesmo horário (exatamente um vence), limite por telefone, cancelamento e o
+prazo de uma hora para cancelar.
 
 O indicador de desenvolvimento do Next.js está desativado. Não há cursor
 personalizado na página. Em navegadores compatíveis, ferramentas WebMCP permitem

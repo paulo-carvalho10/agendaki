@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { PaginaPublica } from '../../src/agenda/pagina-publica.js';
-import { formatarTelefone, mensagensRecusa, normalizarTelefone, validarPedido,
+import { ANTECEDENCIA_CANCELAMENTO_MIN, antecedenciaCancelamentoTexto, formatarTelefone, mensagensRecusa, normalizarTelefone, validarPedido,
   type PedidoReserva, type ReservaConfirmada, type ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
 
 const reais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -140,6 +140,8 @@ function Confirmacao({ reserva, dataHora, rotaCancelamento, copiado, aoCopiar }:
   const mensagem = `Olá! Agendei ${reserva.servico.nome.toLowerCase()} para ${dataHora(reserva.inicio)}, pelo Agendaki. Meu nome é ${reserva.cliente.nome}.`;
   const telefoneNegocio = normalizarTelefone(reserva.negocio.telefone);
   const link = rotaCancelamento && typeof window !== 'undefined' ? `${window.location.origin}${rotaCancelamento}${reserva.tokenCancelamento}` : null;
+  // Reserva feita em cima da hora já nasce fora do prazo de cancelamento.
+  const [noPrazo] = useState(() => new Date(reserva.inicio).getTime() - Date.now() >= ANTECEDENCIA_CANCELAMENTO_MIN * 60_000);
   async function copiar() {
     if (!link) return;
     try { await navigator.clipboard.writeText(link); aoCopiar(); } catch { /* O link continua visível para copiar à mão. */ }
@@ -156,8 +158,9 @@ function Confirmacao({ reserva, dataHora, rotaCancelamento, copiado, aoCopiar }:
     {reserva.negocio.demonstracao ? <div className="bloco"><h3>Aviso pelo WhatsApp</h3><p>Na versão de verdade, um toque abre o WhatsApp do negócio com esta mensagem pronta. Na demonstração nada é enviado.</p><p className="mensagem">{mensagem}</p></div>
     : telefoneNegocio && <div className="bloco"><h3>Avise pelo WhatsApp</h3><p>Um toque abre a conversa com {formatarTelefone(telefoneNegocio)} e a mensagem já vai pronta. Assim o combinado fica registrado para os dois.</p><a className="botao" href={`https://wa.me/55${telefoneNegocio}?text=${encodeURIComponent(mensagem)}`} target="_blank" rel="noopener noreferrer">Enviar confirmação no WhatsApp</a></div>}
     <div className="bloco"><h3>Precisa cancelar?</h3>
-      {link ? <><p>Guarde este link. Com ele você cancela quando quiser, até a hora marcada, e o horário volta a ficar livre.</p><p className="link-cancelar"><a href={link}>{link}</a></p><button className="botao secundario" type="button" onClick={copiar}>{copiado ? 'Link copiado ✓' : 'Copiar link'}</button></>
-      : <p>Na versão de verdade, você recebe aqui um link pessoal para cancelar até a hora marcada. O horário volta a ficar livre na mesma hora.</p>}
+      {!noPrazo ? <p>O cancelamento pelo link vale até {antecedenciaCancelamentoTexto} antes do horário. Como o seu é daqui a pouco, se não puder vir avise o negócio direto.</p>
+      : link ? <><p>Guarde este link. Com ele você cancela até {antecedenciaCancelamentoTexto} antes do horário, e a vaga volta a ficar livre para outra pessoa.</p><p className="link-cancelar"><a href={link}>{link}</a></p><button className="botao secundario" type="button" onClick={copiar}>{copiado ? 'Link copiado ✓' : 'Copiar link'}</button></>
+      : <p>Na versão de verdade, você recebe aqui um link pessoal para cancelar até {antecedenciaCancelamentoTexto} antes do horário. A vaga volta a ficar livre na mesma hora.</p>}
     </div>
     <div className="atualizacao"><span>Seus dados são usados só para este agendamento.</span><button onClick={() => window.location.reload()}>Marcar outro horário <span aria-hidden="true">↻</span></button></div>
   </div>;

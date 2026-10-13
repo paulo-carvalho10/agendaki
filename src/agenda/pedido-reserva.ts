@@ -7,6 +7,15 @@
 export const PASSO_GRADE_MIN = 30;
 /** Reservas futuras que um mesmo telefone pode manter no mesmo negócio. */
 export const LIMITE_RESERVAS_POR_TELEFONE = 2;
+/**
+ * O cliente cancela pelo link até esta antecedência do início. Depois disso
+ * o negócio já não teria tempo de ocupar a vaga.
+ */
+export const ANTECEDENCIA_CANCELAMENTO_MIN = 60;
+/** "1 hora", "2 horas" ou "45 minutos", para os textos da tela. */
+export const antecedenciaCancelamentoTexto = ANTECEDENCIA_CANCELAMENTO_MIN % 60 === 0
+  ? `${ANTECEDENCIA_CANCELAMENTO_MIN / 60} hora${ANTECEDENCIA_CANCELAMENTO_MIN === 60 ? '' : 's'}`
+  : `${ANTECEDENCIA_CANCELAMENTO_MIN} minutos`;
 
 export type PedidoReserva = Readonly<{
   slug: string;
