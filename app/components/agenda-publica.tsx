@@ -2,10 +2,9 @@
 import { useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { PaginaPublica } from '../../src/agenda/pagina-publica.js';
-import { ANTECEDENCIA_CANCELAMENTO_MIN, antecedenciaCancelamentoTexto, formatarTelefone, mensagensRecusa, normalizarTelefone, validarPedido,
+import { ANTECEDENCIA_CANCELAMENTO_MIN, antecedenciaCancelamentoTexto, formatarTelefone, mensagensRecusa, normalizarTelefone, reais, validarPedido,
   type PedidoReserva, type ReservaConfirmada, type ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
 
-const reais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 function dataTexto(data: string, options: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('pt-BR', { ...options, timeZone: 'UTC' }).format(new Date(`${data}T12:00:00Z`));
@@ -17,8 +16,10 @@ type Props = {
   aoReservar?: (pedido: PedidoReserva) => Promise<ResultadoReserva>;
   /** Caminho da página de cancelamento; null onde ela não existe (demonstração estática). */
   rotaCancelamento?: string | null;
+  /** Na demonstração, leva ao painel do dono com os mesmos dados fictícios. */
+  hrefPainelDemo?: string;
 };
-export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelamento = '/cancelar/' }: Props) {
+export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelamento = '/cancelar/', hrefPainelDemo }: Props) {
   const inicial = dados.servicos.find((s) => s.nome === 'Corte') ?? dados.servicos[0];
   const [servicoId, setServico] = useState(inicial?.id);
   const [dia, setDia] = useState(inicial?.horarios[0]?.dataLocal ?? dados.dias[0]);
@@ -93,7 +94,7 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
         <p className="descricao">Escolha o serviço e encontre um horário que combina com o seu dia.</p>
         <div className="linha-detalhe"><span aria-hidden="true">◷</span><div><strong>Horário de funcionamento</strong><ul className="expediente">{dados.funcionamento.map((f, i) => <li key={i}>{nomesDias[f.diaSemana]} <span>{f.abre.slice(0, 5)}–{f.fecha.slice(0, 5)}{f.terminaDiaSeguinte ? ' (+1 dia)' : ''}</span></li>)}</ul></div></div>
         <p className="fuso">Horários em {dados.negocio.fuso.replaceAll('_', ' ')}</p>
-        {dados.negocio.demonstracao && <div className="nota-demo"><strong>Fique à vontade para explorar.</strong><p>{aoReservar ? 'Esta é uma barbearia fictícia. Marque um horário para ver como funciona: nenhuma mensagem é enviada.' : 'Esta é uma barbearia fictícia. Nenhum atendimento será marcado.'}</p></div>}
+        {dados.negocio.demonstracao && <div className="nota-demo"><strong>Fique à vontade para explorar.</strong><p>{aoReservar ? 'Esta é uma barbearia fictícia. Marque um horário para ver como funciona: nenhuma mensagem é enviada.' : 'Esta é uma barbearia fictícia. Nenhum atendimento será marcado.'}</p>{hrefPainelDemo && <p><a className="link-demo" href={hrefPainelDemo}>Ver o painel do dono →</a></p>}</div>}
       </aside>
       {confirmada ? <Confirmacao reserva={confirmada} dataHora={dataHora} rotaCancelamento={rotaCancelamento} copiado={copiado} aoCopiar={() => setCopiado(true)} /> : <div className="agenda">
         <section aria-labelledby="servicos-titulo"><div className="titulo-secao"><span className="numero">01</span><h2 id="servicos-titulo">Qual vai ser o cuidado de hoje?</h2></div>
@@ -129,7 +130,7 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
         <div className="atualizacao"><span>Consultado às {hora(dados.atualizadoEm)}</span><button onClick={() => window.location.reload()}>Consultar novamente <span aria-hidden="true">↻</span></button></div>
       </div>}
     </main>
-    <footer><span>Seu horário. Sem complicação.</span><span>Feito com <b>agendaki</b> · v0.5.0</span></footer>
+    <footer><span>Seu horário. Sem complicação.</span><span>Feito com <b>agendaki</b> · v0.6.0</span></footer>
   </div>;
 }
 

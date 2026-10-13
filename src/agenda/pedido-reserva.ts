@@ -17,6 +17,11 @@ export const antecedenciaCancelamentoTexto = ANTECEDENCIA_CANCELAMENTO_MIN % 60 
   ? `${ANTECEDENCIA_CANCELAMENTO_MIN / 60} hora${ANTECEDENCIA_CANCELAMENTO_MIN === 60 ? '' : 's'}`
   : `${ANTECEDENCIA_CANCELAMENTO_MIN} minutos`;
 
+const semCentavos = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+const comCentavos = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+/** Preço em reais para a tela: "R$ 40" quando é redondo, "R$ 25,50" quando tem centavos. */
+export const reais = { format: (valor: number) => (Number.isInteger(valor) ? semCentavos : comCentavos).format(valor) };
+
 export type PedidoReserva = Readonly<{
   slug: string;
   servicoId: string;

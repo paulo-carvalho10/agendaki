@@ -1,14 +1,12 @@
 import type { Metadata } from 'next';
 import { bancoServidor } from '../../../src/db/server.js';
 import { limiteCancelamento, obterAgendamentoPorToken } from '../../../src/agenda/cancelar.js';
-import { antecedenciaCancelamentoTexto, formatarTelefone, normalizarTelefone } from '../../../src/agenda/pedido-reserva.js';
+import { antecedenciaCancelamentoTexto, formatarTelefone, normalizarTelefone, reais } from '../../../src/agenda/pedido-reserva.js';
 import { cancelar } from '../../acoes';
 
 export const dynamic = 'force-dynamic';
 // O endereço carrega o token: ele não deve vazar no cabeçalho Referer de nenhum link.
 export const metadata: Metadata = { title: 'Agendaki · Seu agendamento', referrer: 'no-referrer' };
-
-const reais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
 export default async function Pagina({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

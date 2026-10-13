@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { formatarTelefone, normalizarNome, normalizarTelefone, validarPedido } from '../src/agenda/pedido-reserva.js';
+import { formatarTelefone, normalizarNome, normalizarTelefone, reais, validarPedido } from '../src/agenda/pedido-reserva.js';
 
 const base = { slug: 'barbearia-demo', servicoId: '0b1f6c1e-6a52-4a0e-9a54-2f2d1c7d9e10', inicio: '2030-01-07T12:00:00.000Z', nome: 'Ana', telefone: '34999991234' };
 
@@ -42,4 +42,13 @@ test('recusa cada campo fora do formato', () => {
 test('a demonstração estática aceita identificadores de serviço que não são UUID', () => {
   expect(validarPedido({ ...base, servicoId: 'demo-corte' }, { servicoIdLivre: true })).not.toBeNull();
   expect(validarPedido({ ...base, servicoId: '' }, { servicoIdLivre: true })).toBeNull();
+});
+
+test('mostra o preço sem centavos quando é redondo e com dois dígitos quando não é', () => {
+  const texto = (valor: number) => reais.format(valor).replace(/\s/g, ' ');
+  expect(texto(40)).toBe('R$ 40');
+  expect(texto(25.5)).toBe('R$ 25,50');
+  expect(texto(0)).toBe('R$ 0');
+  expect(texto(1250)).toBe('R$ 1.250');
+  expect(texto(1250.9)).toBe('R$ 1.250,90');
 });
