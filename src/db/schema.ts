@@ -26,7 +26,22 @@ export const usuario = pgTable('usuario', {
   negocioId: uuid('negocio_id').notNull().references(() => negocio.id),
   email: text('email').notNull().unique(),
   senhaHash: text('senha_hash').notNull(),
+  // Tentativas erradas seguidas e o fim do bloqueio temporário do login.
+  falhasLogin: integer('falhas_login').notNull().default(0),
+  bloqueadoAte: instante('bloqueado_ate'),
 }, (t) => [check('usuario_email_normalizado', sql`${t.email} = lower(trim(${t.email}))`)]);
+
+// O navegador guarda o token; o banco guarda só o SHA-256, como no cancelamento.
+export const sessao = pgTable('sessao', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  usuarioId: uuid('usuario_id').notNull().references(() => usuario.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  criadaEm: instante('criada_em').notNull().defaultNow(),
+  expiraEm: instante('expira_em').notNull(),
+}, (t) => [
+  check('sessao_token_sha256', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+  index('sessao_expira_idx').on(t.expiraEm),
+]);
 
 export const servico = pgTable('servico', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -75,6 +90,8 @@ export const agendamento = pgTable('agendamento', {
   fim: instante('fim').notNull(),
   status: statusAgendamento('status').notNull().default('confirmado'),
   tokenCancelamentoHash: text('token_cancelamento_hash').notNull().unique(),
+  // Quando o dono abriu o lembrete deste horário no WhatsApp.
+  lembreteEm: instante('lembrete_em'),
 }, (t) => [
   foreignKey({ name: 'agendamento_servico_do_negocio_fk', columns: [t.negocioId, t.servicoId], foreignColumns: [servico.negocioId, servico.id] }),
   check('agendamento_intervalo_valido', sql`${t.fim} > ${t.inicio}`),

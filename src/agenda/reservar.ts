@@ -29,10 +29,11 @@ export const hashToken = (token: string) => createHash('sha256').update(token).d
 /**
  * Grava uma reserva. O horário é recalculado dentro da transação com o mesmo
  * motor da página pública, e a exclusão e o trigger do PostgreSQL decidem
- * quando dois pedidos disputam o mesmo intervalo.
+ * quando dois pedidos disputam o mesmo intervalo. Com `peloDono`, vale para
+ * o painel: sem limite por telefone e com telefone opcional.
  */
-export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = new Date()): Promise<ResultadoReserva> {
-  const valido = validarPedido(pedido);
+export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = new Date(), { peloDono = false } = {}): Promise<ResultadoReserva> {
+  const valido = validarPedido(pedido, { telefoneOpcional: peloDono });
   if (!valido) return recusar('dados_invalidos');
 
   for (let tentativa = 1; ; tentativa++) {
@@ -76,10 +77,13 @@ export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = 
         });
         if (!livres.some((h) => new Date(h.inicio).getTime() === inicio.getTime())) return recusar('horario_indisponivel');
 
-        const [{ futuras }] = await tx.select({ futuras: sql<number>`count(*)::int` }).from(schema.agendamento)
-          .where(and(eq(schema.agendamento.negocioId, negocio.id), eq(schema.agendamento.clienteTelefone, valido.telefone),
-            eq(schema.agendamento.status, 'confirmado'), gt(schema.agendamento.inicio, agora)));
-        if (futuras >= LIMITE_RESERVAS_POR_TELEFONE) return recusar('limite_reservas');
+        // O limite protege a página pública; o dono agenda quantos quiser.
+        if (!peloDono) {
+          const [{ futuras }] = await tx.select({ futuras: sql<number>`count(*)::int` }).from(schema.agendamento)
+            .where(and(eq(schema.agendamento.negocioId, negocio.id), eq(schema.agendamento.clienteTelefone, valido.telefone),
+              eq(schema.agendamento.status, 'confirmado'), gt(schema.agendamento.inicio, agora)));
+          if (futuras >= LIMITE_RESERVAS_POR_TELEFONE) return recusar('limite_reservas');
+        }
 
         const tokenCancelamento = randomBytes(32).toString('base64url');
         await tx.insert(schema.agendamento).values({ negocioId: negocio.id, servicoId: servico.id,

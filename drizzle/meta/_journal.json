@@ -15,6 +15,13 @@
       "when": 1789139204691,
       "tag": "0001_protecao_agenda",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791915561252,
+      "tag": "0002_painel_do_dono",
+      "breakpoints": true
     }
   ]
 }

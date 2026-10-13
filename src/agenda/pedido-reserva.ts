@@ -88,9 +88,10 @@ export type PedidoValido = { slug: string; servicoId: string; inicio: Date; nome
 
 /**
  * Confere o formato de cada campo. `servicoIdLivre` existe para a
- * demonstração estática, cujos serviços não têm UUID.
+ * demonstração estática, cujos serviços não têm UUID. `telefoneOpcional`
+ * vale para o dono, que agenda quem veio ao balcão sem deixar telefone.
  */
-export function validarPedido(pedido: PedidoReserva, { servicoIdLivre = false } = {}): PedidoValido | null {
+export function validarPedido(pedido: PedidoReserva, { servicoIdLivre = false, telefoneOpcional = false } = {}): PedidoValido | null {
   if (!pedido || typeof pedido !== 'object') return null;
   const { slug, servicoId, inicio, nome, telefone, site } = pedido;
   if ([slug, servicoId, inicio, nome, telefone].some((campo) => typeof campo !== 'string')) return null;
@@ -102,7 +103,7 @@ export function validarPedido(pedido: PedidoReserva, { servicoIdLivre = false } 
   if (Number.isNaN(instante.getTime())) return null;
   const nomeLimpo = normalizarNome(nome);
   if (nomeLimpo.length < 2 || nomeLimpo.length > 80 || !/\p{L}/u.test(nomeLimpo)) return null;
-  const telefoneLimpo = normalizarTelefone(telefone);
-  if (!telefoneLimpo) return null;
+  const telefoneLimpo = telefoneOpcional && !telefone.trim() ? '' : normalizarTelefone(telefone);
+  if (telefoneLimpo === null) return null;
   return { slug, servicoId, inicio: instante, nome: nomeLimpo, telefone: telefoneLimpo };
 }
