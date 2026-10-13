@@ -43,6 +43,18 @@ export const sessao = pgTable('sessao', {
   index('sessao_expira_idx').on(t.expiraEm),
 ]);
 
+// Quem atende. Cada profissional tem a própria agenda; todo negócio tem pelo menos um.
+export const profissional = pgTable('profissional', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  negocioId: uuid('negocio_id').notNull().references(() => negocio.id),
+  nome: text('nome').notNull(),
+  ativo: boolean('ativo').notNull().default(true),
+  criadoEm: instante('criado_em').notNull().defaultNow(),
+}, (t) => [
+  unique('profissional_negocio_id_id_unique').on(t.negocioId, t.id),
+  check('profissional_nome_preenchido', sql`length(trim(${t.nome})) > 0`),
+]);
+
 export const servico = pgTable('servico', {
   id: uuid('id').primaryKey().defaultRandom(),
   negocioId: uuid('negocio_id').notNull().references(() => negocio.id),
@@ -72,10 +84,13 @@ export const horarioFuncionamento = pgTable('horario_funcionamento', {
 export const bloqueio = pgTable('bloqueio', {
   id: uuid('id').primaryKey().defaultRandom(),
   negocioId: uuid('negocio_id').notNull().references(() => negocio.id),
+  // Nulo fecha a agenda de todos os profissionais; preenchido, só a daquele.
+  profissionalId: uuid('profissional_id'),
   inicio: instante('inicio').notNull(),
   fim: instante('fim').notNull(),
   motivo: text('motivo').notNull(),
 }, (t) => [
+  foreignKey({ name: 'bloqueio_profissional_do_negocio_fk', columns: [t.negocioId, t.profissionalId], foreignColumns: [profissional.negocioId, profissional.id] }),
   check('bloqueio_intervalo_valido', sql`${t.fim} > ${t.inicio}`),
   index('bloqueio_negocio_inicio_idx').on(t.negocioId, t.inicio),
 ]);
@@ -84,6 +99,7 @@ export const agendamento = pgTable('agendamento', {
   id: uuid('id').primaryKey().defaultRandom(),
   negocioId: uuid('negocio_id').notNull().references(() => negocio.id),
   servicoId: uuid('servico_id').notNull(),
+  profissionalId: uuid('profissional_id').notNull(),
   clienteNome: text('cliente_nome').notNull(),
   clienteTelefone: text('cliente_telefone').notNull(),
   inicio: instante('inicio').notNull(),
@@ -94,9 +110,10 @@ export const agendamento = pgTable('agendamento', {
   lembreteEm: instante('lembrete_em'),
 }, (t) => [
   foreignKey({ name: 'agendamento_servico_do_negocio_fk', columns: [t.negocioId, t.servicoId], foreignColumns: [servico.negocioId, servico.id] }),
+  foreignKey({ name: 'agendamento_profissional_do_negocio_fk', columns: [t.negocioId, t.profissionalId], foreignColumns: [profissional.negocioId, profissional.id] }),
   check('agendamento_intervalo_valido', sql`${t.fim} > ${t.inicio}`),
   check('agendamento_token_sha256', sql`${t.tokenCancelamentoHash} ~ '^[0-9a-f]{64}$'`),
   index('agendamento_negocio_inicio_idx').on(t.negocioId, t.inicio),
 ]);
 
-// Exclusão GiST e triggers ficam na migração SQL customizada. Não usar db:push.
+// Exclusão GiST (por profissional) e triggers ficam nas migrações SQL customizadas. Não usar db:push.

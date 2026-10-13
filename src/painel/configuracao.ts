@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ne, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema.js';
 import { codigoPostgres } from '../agenda/reservar.js';
@@ -29,7 +29,10 @@ export async function obterConfiguracao(db: Banco, negocioId: string) {
   // A tela edita uma faixa por dia, sem virar a noite. Expedientes mais
   // complexos são preservados e ficam só para leitura.
   const simples = faixas.every((f) => !f.terminaDiaSeguinte) && new Set(faixas.map((f) => f.diaSemana)).size === faixas.length;
-  return { negocio, servicos, simples,
+  const profissionais = await db.select({ id: schema.profissional.id, nome: schema.profissional.nome, ativo: schema.profissional.ativo })
+    .from(schema.profissional).where(eq(schema.profissional.negocioId, negocioId))
+    .orderBy(desc(schema.profissional.ativo), asc(schema.profissional.criadoEm), asc(schema.profissional.id));
+  return { negocio, servicos, profissionais, simples,
     funcionamento: faixas.map((f) => ({ ...f, abre: f.abre.slice(0, 5), fecha: f.fecha.slice(0, 5) })) };
 }
 
@@ -115,4 +118,61 @@ export async function salvarFuncionamento(db: Banco, negocioId: string, dias: re
     }
   });
   return { ok: true };
+}
+
+export type DadosProfissional = Readonly<{ id?: string; nome: string }>;
+
+/** Cria um profissional, que já entra atendendo, ou muda o nome de um existente. */
+export async function salvarProfissional(db: Banco, negocioId: string, dados: DadosProfissional): Promise<ResultadoPainel> {
+  if (!dados || typeof dados.nome !== 'string') return recusa('Preencha o nome do profissional.');
+  const nome = normalizarNome(dados.nome);
+  if (nome.length < 2 || nome.length > 60) return recusa('O nome do profissional precisa ter de 2 a 60 letras.');
+  if (dados.id === undefined) {
+    const [negocio] = await db.select({ id: schema.negocio.id }).from(schema.negocio).where(eq(schema.negocio.id, negocioId)).limit(1);
+    if (!negocio) return recusa('Negócio não encontrado.');
+    await db.insert(schema.profissional).values({ negocioId, nome });
+    return { ok: true };
+  }
+  try {
+    const salvos = await db.update(schema.profissional).set({ nome })
+      .where(and(eq(schema.profissional.id, dados.id), eq(schema.profissional.negocioId, negocioId))).returning({ id: schema.profissional.id });
+    return salvos.length ? { ok: true } : recusa('Profissional não encontrado.');
+  } catch (erro) {
+    if (codigoPostgres(erro) === '22P02') return recusa('Profissional não encontrado.');
+    throw erro;
+  }
+}
+
+/**
+ * Desativar tira o profissional da página pública e do painel sem apagar o
+ * histórico. Não vale para o último ativo, nem para quem ainda tem cliente
+ * confirmado pela frente: esses horários ficariam sem quem atender.
+ */
+export async function definirProfissionalAtivo(db: Banco, negocioId: string, profissionalId: string, ativo: boolean, agora = new Date()): Promise<ResultadoPainel> {
+  if (typeof ativo !== 'boolean') return recusa('Profissional não encontrado.');
+  try {
+    return await db.transaction(async (tx) => {
+      // A mesma trava das reservas: nenhuma entra para este profissional enquanto ele é desativado.
+      await tx.execute(sql`select id from negocio where id = ${negocioId}::uuid for update`);
+      const filtro = and(eq(schema.profissional.id, profissionalId), eq(schema.profissional.negocioId, negocioId));
+      const [atual] = await tx.select({ ativo: schema.profissional.ativo, nome: schema.profissional.nome }).from(schema.profissional).where(filtro).limit(1);
+      if (!atual) return recusa('Profissional não encontrado.');
+      if (atual.ativo === ativo) return { ok: true as const };
+      if (!ativo) {
+        const [{ outros }] = await tx.select({ outros: sql<number>`count(*)::int` }).from(schema.profissional)
+          .where(and(eq(schema.profissional.negocioId, negocioId), eq(schema.profissional.ativo, true), ne(schema.profissional.id, profissionalId)));
+        if (outros === 0) return recusa('O negócio precisa de pelo menos um profissional atendendo.');
+        const [{ futuros }] = await tx.select({ futuros: sql<number>`count(*)::int` }).from(schema.agendamento)
+          .where(and(eq(schema.agendamento.profissionalId, profissionalId), eq(schema.agendamento.status, 'confirmado'), gt(schema.agendamento.inicio, agora)));
+        if (futuros > 0) {
+          return recusa(`${atual.nome} ainda tem ${futuros} ${futuros === 1 ? 'cliente marcado' : 'clientes marcados'}. Cancele ou atenda esses horários antes de desativar.`);
+        }
+      }
+      await tx.update(schema.profissional).set({ ativo }).where(filtro);
+      return { ok: true as const };
+    });
+  } catch (erro) {
+    if (codigoPostgres(erro) === '22P02') return recusa('Profissional não encontrado.');
+    throw erro;
+  }
 }

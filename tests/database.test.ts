@@ -14,6 +14,7 @@ let cluster: EmbeddedPostgres;
 let connection: ReturnType<typeof conectar>;
 let negocioId: string;
 let servicoId: string;
+let profissionalId: string;
 const raizTemporaria = resolve(process.env.TEST_WORK_DIR ?? '.test-postgres');
 const diretorioTemporario = resolve(raizTemporaria, randomUUID());
 
@@ -53,15 +54,21 @@ beforeEach(async () => {
   negocioId = n.id;
   const [s] = await connection.client`insert into servico (negocio_id, nome, duracao_min, preco_centavos) values (${negocioId}, 'Corte', 30, 4000) returning id`;
   servicoId = s.id;
+  profissionalId = await novoProfissional('Caio');
 });
+
+async function novoProfissional(nome: string, negocio = negocioId) {
+  const [p] = await connection.client`insert into profissional (negocio_id, nome) values (${negocio}, ${nome}) returning id`;
+  return p.id as string;
+}
 
 type Executor = postgres.Sql | postgres.TransactionSql;
 function reservar(client: Executor, inicio = '2030-01-07T12:00:00Z', fim = '2030-01-07T13:00:00Z', status = 'confirmado') {
-  return client`insert into agendamento (negocio_id, servico_id, cliente_nome, cliente_telefone, inicio, fim, status, token_cancelamento_hash)
-    values (${negocioId}, ${servicoId}, 'Cliente exemplo', '00000000000', ${inicio}, ${fim}, ${status}, ${randomBytes(32).toString('hex')}) returning id`;
+  return client`insert into agendamento (negocio_id, servico_id, profissional_id, cliente_nome, cliente_telefone, inicio, fim, status, token_cancelamento_hash)
+    values (${negocioId}, ${servicoId}, ${profissionalId}, 'Cliente exemplo', '00000000000', ${inicio}, ${fim}, ${status}, ${randomBytes(32).toString('hex')}) returning id`;
 }
-function bloquear(client: Executor, inicio = '2030-01-07T12:30:00Z', fim = '2030-01-07T13:30:00Z') {
-  return client`insert into bloqueio (negocio_id, inicio, fim, motivo) values (${negocioId}, ${inicio}, ${fim}, 'Teste') returning id`;
+function bloquear(client: Executor, inicio = '2030-01-07T12:30:00Z', fim = '2030-01-07T13:30:00Z', profissional: string | null = null) {
+  return client`insert into bloqueio (negocio_id, profissional_id, inicio, fim, motivo) values (${negocioId}, ${profissional}, ${inicio}, ${fim}, 'Teste') returning id`;
 }
 
 test('migrações podem rodar novamente sem recriar tabelas', async () => {
@@ -97,7 +104,42 @@ test('permite o mesmo horário em negócios diferentes', async () => {
   negocioId = outro.id;
   const [s] = await connection.client`insert into servico (negocio_id, nome, duracao_min, preco_centavos) values (${negocioId}, 'Corte', 30, 4000) returning id`;
   servicoId = s.id;
+  profissionalId = await novoProfissional('Bia');
   await expect(reservar(connection.client)).resolves.toHaveLength(1);
+});
+
+test('dois profissionais atendem no mesmo horário, e nenhum deles em dois lugares', async () => {
+  await reservar(connection.client);
+  profissionalId = await novoProfissional('Diego');
+  await expect(reservar(connection.client)).resolves.toHaveLength(1);
+  await expect(reservar(connection.client, '2030-01-07T12:30Z', '2030-01-07T13:30Z')).rejects.toMatchObject({ code: '23P01' });
+});
+
+test('rejeita profissional de outro negócio, em reserva e em bloqueio', async () => {
+  const [outro] = await connection.client`insert into negocio (nome, slug, telefone) values ('Outro', ${randomUUID()}, '00000000000') returning id`;
+  const alheio = await novoProfissional('Alheio', outro.id);
+  profissionalId = alheio;
+  await expect(reservar(connection.client)).rejects.toMatchObject({ code: '23503' });
+  await expect(bloquear(connection.client, undefined, undefined, alheio)).rejects.toMatchObject({ code: '23503' });
+  await expect(connection.client`insert into profissional (negocio_id, nome) values (${negocioId}, '   ')`).rejects.toMatchObject({ code: '23514' });
+});
+
+test('bloqueio de um profissional não fecha a agenda do outro; o geral fecha a de todos', async () => {
+  const caio = profissionalId;
+  const diego = await novoProfissional('Diego');
+  await bloquear(connection.client, undefined, undefined, caio);
+  await expect(reservar(connection.client)).rejects.toMatchObject({ code: '23P01' });
+  profissionalId = diego;
+  await expect(reservar(connection.client)).resolves.toHaveLength(1);
+  // Diego está ocupado: não dá para bloquear a agenda dele nem a de todos; a do Caio, sim.
+  await expect(bloquear(connection.client, undefined, undefined, diego)).rejects.toMatchObject({ code: '23P01' });
+  await expect(bloquear(connection.client)).rejects.toMatchObject({ code: '23P01' });
+  await expect(bloquear(connection.client, '2030-01-07T12:00Z', '2030-01-07T12:30Z', caio)).resolves.toHaveLength(1);
+  // Um bloqueio geral em outro intervalo fecha a agenda dos dois.
+  await bloquear(connection.client, '2030-01-07T15:00Z', '2030-01-07T16:00Z');
+  await expect(reservar(connection.client, '2030-01-07T15:00Z', '2030-01-07T15:30Z')).rejects.toMatchObject({ code: '23P01' });
+  profissionalId = caio;
+  await expect(reservar(connection.client, '2030-01-07T15:00Z', '2030-01-07T15:30Z')).rejects.toMatchObject({ code: '23P01' });
 });
 
 test('rejeita intervalo vazio', async () => {
@@ -177,6 +219,7 @@ test('seed repetível mantém 3 serviços, 6 reservas futuras e outros negócios
   await seedDemo(connection.db, 'senha-apenas-de-teste');
   const resultado = await seedDemo(connection.db, 'senha-apenas-de-teste');
   expect(resultado.agendamentos).toBe(6);
+  expect(resultado.profissionais).toBe(2);
   expect(resultado.linksCancelamento).toHaveLength(6);
   const [contagem] = await connection.client`select count(*)::int as total from agendamento where negocio_id = ${DEMO_ID}`;
   const [servicos] = await connection.client`select count(*)::int as total from servico where negocio_id = ${DEMO_ID}`;
@@ -184,6 +227,10 @@ test('seed repetível mantém 3 serviços, 6 reservas futuras e outros negócios
   const [passados] = await connection.client`select count(*)::int as total from agendamento where negocio_id = ${DEMO_ID} and inicio < now()`;
   const [dono] = await connection.client`select senha_hash from usuario where negocio_id = ${DEMO_ID}`;
   expect([contagem.total, servicos.total, outros.total, passados.total]).toEqual([6, 3, 1, 0]);
+  // Dois barbeiros, sempre na mesma ordem, com três clientes cada.
+  const barbeiros = await connection.client`select p.nome, count(a.id)::int as clientes from profissional p
+    left join agendamento a on a.profissional_id = p.id where p.negocio_id = ${DEMO_ID} group by p.id order by p.criado_em`;
+  expect(barbeiros.map((b) => [b.nome, b.clientes])).toEqual([['Caio', 3], ['Diego', 3]]);
   expect(dono.senha_hash).toMatch(/^scrypt:[0-9a-f]{32}:[0-9a-f]{128}$/);
 });
 

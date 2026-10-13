@@ -4,8 +4,8 @@
  * verdade. Nada aqui importa código de banco em tempo de execução.
  */
 import { Temporal } from '@js-temporal/polyfill';
-import { calcularHorariosLivres } from '../agenda/horarios-livres.js';
-import { PASSO_GRADE_MIN, recusar, validarPedido, type ResultadoReserva } from '../agenda/pedido-reserva.js';
+import { escolherProfissional, horariosLivresPorProfissional, type Ocupacao } from '../agenda/disponibilidade.js';
+import { recusar, validarPedido, type ResultadoReserva } from '../agenda/pedido-reserva.js';
 import type { AgendaDoDia, StatusAgendamento } from './agenda.js';
 import type { PedidoBloqueio, PedidoDoDono, ResultadoPainel } from './acoes.js';
 
@@ -14,9 +14,11 @@ const DIAS_OFERECIDOS = 14;
 const ALCANCE_DIAS = 90;
 const BUSCA_LEMBRETES_DIAS = 4;
 
-type AgendamentoDemo = { id: string; servicoId: string; inicio: string; fim: string; status: StatusAgendamento; clienteNome: string; clienteTelefone: string; lembreteEm: string | null };
-type BloqueioDemo = { id: string; inicio: string; fim: string; motivo: string };
+type AgendamentoDemo = { id: string; servicoId: string; profissionalId: string; inicio: string; fim: string; status: StatusAgendamento; clienteNome: string; clienteTelefone: string; lembreteEm: string | null };
+/** `profissionalId` nulo: o bloqueio vale para todos. */
+type BloqueioDemo = { id: string; inicio: string; fim: string; motivo: string; profissionalId: string | null };
 export type EstadoDemo = Readonly<{
+  profissionais: readonly { id: string; nome: string }[];
   servicos: readonly { id: string; nome: string; duracaoMin: number; precoCentavos: number }[];
   funcionamento: readonly { diaSemana: number; abre: string; fecha: string; terminaDiaSeguinte: boolean }[];
   agendamentos: readonly AgendamentoDemo[];
@@ -33,6 +35,7 @@ const recusa = (mensagem: string): ResultadoPainel => ({ ok: false, mensagem });
 /** Uma barbearia fictícia com clientes hoje (alguns já atendidos) e no próximo dia útil. */
 export function criarEstadoDemo(agora = new Date()): EstadoDemo {
   const hoje = hojeEm(agora);
+  const profissionais = [{ id: 'demo-caio', nome: 'Caio' }, { id: 'demo-diego', nome: 'Diego' }];
   const servicos = [
     { id: 'demo-barba', nome: 'Barba', duracaoMin: 30, precoCentavos: 3000 },
     { id: 'demo-corte', nome: 'Corte', duracaoMin: 30, precoCentavos: 4000 },
@@ -44,35 +47,38 @@ export function criarEstadoDemo(agora = new Date()): EstadoDemo {
   while (!aberto(proximo)) proximo = proximo.add({ days: 1 });
 
   let id = 0;
-  const marcar = (data: Temporal.PlainDate, hora: string, servicoId: string, clienteNome: string, final: string): AgendamentoDemo => {
+  const marcar = (data: Temporal.PlainDate, hora: string, servicoId: string, clienteNome: string, final: string, quem: 'caio' | 'diego'): AgendamentoDemo => {
     const servico = servicos.find((s) => s.id === servicoId)!;
     const inicio = iso(data, hora);
     const fim = new Date(new Date(inicio).getTime() + servico.duracaoMin * 60_000).toISOString();
-    return { id: `demo-a${++id}`, servicoId, inicio, fim, status: 'confirmado', clienteNome, clienteTelefone: `349000000${final}`, lembreteEm: null };
+    return { id: `demo-a${++id}`, servicoId, profissionalId: `demo-${quem}`, inicio, fim, status: 'confirmado', clienteNome, clienteTelefone: `349000000${final}`, lembreteEm: null };
   };
   const deHoje = aberto(hoje) ? [
-    marcar(hoje, '09:00', 'demo-corte', 'Marcos Andrade', '01'),
-    marcar(hoje, '10:30', 'demo-barba', 'Rafael Nunes', '02'),
-    marcar(hoje, '14:00', 'demo-combo', 'João Pedro Lima', '03'),
-    marcar(hoje, '16:30', 'demo-corte', 'Gustavo Reis', '04'),
+    marcar(hoje, '09:00', 'demo-corte', 'Marcos Andrade', '01', 'caio'),
+    marcar(hoje, '10:30', 'demo-barba', 'Rafael Nunes', '02', 'diego'),
+    marcar(hoje, '14:00', 'demo-combo', 'João Pedro Lima', '03', 'caio'),
+    marcar(hoje, '16:30', 'demo-corte', 'Gustavo Reis', '04', 'diego'),
   ] : [];
   // O primeiro cliente do dia já aparece como atendido, se o horário dele passou.
   const agendamentos = [
     ...deHoje.map((a, i) => (i === 0 && a.fim <= agora.toISOString() ? { ...a, status: 'atendido' as const } : a)),
-    marcar(proximo, '09:30', 'demo-corte', 'Lucas Martins', '05'),
-    marcar(proximo, '11:00', 'demo-combo', 'André Souza', '06'),
-    marcar(proximo, '15:00', 'demo-barba', 'Felipe Castro', '07'),
+    marcar(proximo, '09:30', 'demo-corte', 'Lucas Martins', '05', 'caio'),
+    marcar(proximo, '11:00', 'demo-combo', 'André Souza', '06', 'diego'),
+    marcar(proximo, '15:00', 'demo-barba', 'Felipe Castro', '07', 'caio'),
   ];
-  const bloqueios = [hoje, proximo].filter(aberto).map((data, i) => ({ id: `demo-b${i + 1}`, inicio: iso(data, '12:00'), fim: iso(data, '13:00'), motivo: 'Almoço' }));
-  return { servicos, funcionamento, agendamentos, bloqueios, proximoId: 100 };
+  const bloqueios = [hoje, proximo].filter(aberto).map((data, i) => ({ id: `demo-b${i + 1}`, inicio: iso(data, '12:00'), fim: iso(data, '13:00'), motivo: 'Almoço', profissionalId: null }));
+  return { profissionais, servicos, funcionamento, agendamentos, bloqueios, proximoId: 100 };
 }
 
-const ocupam = (estado: EstadoDemo) => estado.agendamentos.filter((a) => a.status !== 'cancelado').map(({ inicio, fim }) => ({ inicio, fim }));
+/** O estado da página no formato que o motor de disponibilidade recebe do banco. */
+const ocupacao = (estado: EstadoDemo): Ocupacao => ({
+  profissionais: estado.profissionais, funcionamento: estado.funcionamento,
+  bloqueios: estado.bloqueios.map(({ inicio, fim, profissionalId }) => ({ inicio, fim, profissionalId })),
+  ocupados: estado.agendamentos.filter((a) => a.status !== 'cancelado').map(({ inicio, fim, profissionalId }) => ({ inicio, fim, profissionalId })),
+});
 
-function horariosLivres(estado: EstadoDemo, dia: Temporal.PlainDate, duracaoMin: number, agora: Date) {
-  return calcularHorariosLivres({ fuso: FUSO, dataInicialLocal: dia.toString(), quantidadeDias: 1, duracaoServicoMin: duracaoMin,
-    passoMin: PASSO_GRADE_MIN, funcionamento: estado.funcionamento, bloqueios: estado.bloqueios.map(({ inicio, fim }) => ({ inicio, fim })),
-    agendamentosOcupados: ocupam(estado), agoraUTC: agora.toISOString() });
+function horariosLivres(estado: EstadoDemo, dia: Temporal.PlainDate, duracaoMin: number, agora: Date, somente?: readonly string[]) {
+  return horariosLivresPorProfissional(ocupacao(estado), { fuso: FUSO, dataInicialLocal: dia.toString(), quantidadeDias: 1, duracaoMin, agora, somente });
 }
 
 /** O mesmo formato que o servidor entrega ao painel de verdade. */
@@ -85,10 +91,12 @@ export function agendaDoDiaDemo(estado: EstadoDemo, diaPedido: string | undefine
       if (Math.abs(hoje.until(pedido).days) <= ALCANCE_DIAS) dia = pedido;
     } catch { /* fica em hoje */ }
   }
+  const nomeDe = (profissionalId: string | null) => estado.profissionais.find((p) => p.id === profissionalId)?.nome ?? null;
   const completo = (a: AgendamentoDemo) => {
     const servico = estado.servicos.find((s) => s.id === a.servicoId)!;
     return { id: a.id, inicio: a.inicio, fim: a.fim, status: a.status, clienteNome: a.clienteNome, clienteTelefone: a.clienteTelefone,
-      lembreteEm: a.lembreteEm, servicoNome: servico.nome, precoCentavos: servico.precoCentavos };
+      lembreteEm: a.lembreteEm, servicoNome: servico.nome, precoCentavos: servico.precoCentavos,
+      profissionalId: a.profissionalId, profissionalNome: nomeDe(a.profissionalId)! };
   };
   const porInicio = (x: { inicio: string }, y: { inicio: string }) => x.inicio.localeCompare(y.inicio);
   const doDia = estado.agendamentos.filter((a) => dataLocal(a.inicio).equals(dia)).sort(porInicio).map(completo);
@@ -104,8 +112,9 @@ export function agendaDoDiaDemo(estado: EstadoDemo, diaPedido: string | undefine
   return {
     negocio, agora: agora.toISOString(), hoje: hoje.toString(), dia: dia.toString(),
     diaAnterior: dia.subtract({ days: 1 }).toString(), diaSeguinte: dia.add({ days: 1 }).toString(),
+    profissionais: [...estado.profissionais],
     agendamentos: doDia,
-    bloqueios: estado.bloqueios.filter((b) => dataLocal(b.inicio).equals(dia)).sort(porInicio).map((b) => ({ ...b })),
+    bloqueios: estado.bloqueios.filter((b) => dataLocal(b.inicio).equals(dia)).sort(porInicio).map((b) => ({ ...b, profissionalNome: nomeDe(b.profissionalId) })),
     lembretes: { dia: diaLembretes?.toString() ?? null, agendamentos: proximos.filter((a) => diaLembretes && dataLocal(a.inicio).equals(diaLembretes)).map(completo) },
     servicos: [...estado.servicos].sort((a, b) => a.precoCentavos - b.precoCentavos)
       .map((s) => ({ ...s, horarios: podeAgendar ? horariosLivres(estado, dia, s.duracaoMin, agora) : [] })),
@@ -144,16 +153,23 @@ export function agendarDemo(estado: EstadoDemo, pedido: PedidoDoDono, agora = ne
   const hoje = hojeEm(agora);
   const dia = dataLocal(valido.inicio.toISOString());
   const distancia = hoje.until(dia).days;
+  if (valido.profissionalId && !estado.profissionais.some((p) => p.id === valido.profissionalId)) return { estado, resultado: recusar('profissional_indisponivel') };
   const livre = distancia >= 0 && distancia < DIAS_OFERECIDOS
-    && horariosLivres(estado, dia, servico.duracaoMin, agora).find((h) => new Date(h.inicio).getTime() === valido.inicio.getTime());
-  if (!livre) return { estado, resultado: recusar('horario_indisponivel') };
+    ? horariosLivres(estado, dia, servico.duracaoMin, agora, valido.profissionalId ? [valido.profissionalId] : undefined)
+      .find((h) => new Date(h.inicio).getTime() === valido.inicio.getTime())
+    : undefined;
+  // Sem preferência, fica com quem está livre e tem menos atendimentos no dia, como no servidor.
+  const profissionalId = livre && (valido.profissionalId
+    ?? escolherProfissional(ocupacao(estado), livre.profissionais, new Date(iso(dia, '00:00')), new Date(iso(dia.add({ days: 1 }), '00:00'))));
+  if (!profissionalId) return { estado, resultado: recusar('horario_indisponivel') };
   const inicio = valido.inicio.toISOString();
   const fim = new Date(valido.inicio.getTime() + servico.duracaoMin * 60_000).toISOString();
-  const novo: AgendamentoDemo = { id: `demo-a${estado.proximoId}`, servicoId: servico.id, inicio, fim, status: 'confirmado', clienteNome: valido.nome, clienteTelefone: valido.telefone, lembreteEm: null };
+  const novo: AgendamentoDemo = { id: `demo-a${estado.proximoId}`, servicoId: servico.id, profissionalId, inicio, fim, status: 'confirmado', clienteNome: valido.nome, clienteTelefone: valido.telefone, lembreteEm: null };
   return {
     estado: { ...estado, agendamentos: [...estado.agendamentos, novo], proximoId: estado.proximoId + 1 },
     resultado: { ok: true, tokenCancelamento: 'demonstracao', inicio, fim, cliente: { nome: valido.nome },
       servico: { nome: servico.nome, duracaoMin: servico.duracaoMin, precoCentavos: servico.precoCentavos },
+      profissional: estado.profissionais.find((p) => p.id === profissionalId)!, variosProfissionais: estado.profissionais.length > 1,
       negocio: { nome: negocio.nome, telefone: '', fuso: FUSO, demonstracao: true } },
   };
 }
@@ -163,14 +179,16 @@ export function bloquearDemo(estado: EstadoDemo, pedido: PedidoBloqueio): Mudanc
   const hora = /^([01]\d|2[0-3]):[0-5]\d$/;
   if (!pedido || !/^\d{4}-\d{2}-\d{2}$/.test(pedido.dia) || !hora.test(pedido.das) || !hora.test(pedido.ate)) return nao('Preencha o dia e os horários.');
   if (pedido.ate <= pedido.das) return nao('O fim do bloqueio precisa ser depois do início.');
+  const profissionalId = pedido.profissionalId || null;
+  if (profissionalId && !estado.profissionais.some((p) => p.id === profissionalId)) return nao('Profissional não encontrado.');
   let inicio: string, fim: string;
   try {
     const dia = Temporal.PlainDate.from(pedido.dia, { overflow: 'reject' });
     inicio = iso(dia, pedido.das); fim = iso(dia, pedido.ate);
   } catch { return nao('Esse dia ou horário não existe no calendário.'); }
-  if (ocupam(estado).some((a) => a.inicio < fim && a.fim > inicio)) return nao('Já existe cliente marcado nesse intervalo. Cancele ou remarque o horário antes de bloquear.');
+  if (ocupacao(estado).ocupados.some((a) => (!profissionalId || a.profissionalId === profissionalId) && a.inicio < fim && a.fim > inicio)) return nao('Já existe cliente marcado nesse intervalo. Cancele ou remarque o horário antes de bloquear.');
   const motivo = pedido.motivo.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Horário bloqueado';
-  return { estado: { ...estado, bloqueios: [...estado.bloqueios, { id: `demo-b${estado.proximoId}`, inicio, fim, motivo }], proximoId: estado.proximoId + 1 }, resultado: { ok: true } };
+  return { estado: { ...estado, bloqueios: [...estado.bloqueios, { id: `demo-b${estado.proximoId}`, inicio, fim, motivo, profissionalId }], proximoId: estado.proximoId + 1 }, resultado: { ok: true } };
 }
 
 export function desbloquearDemo(estado: EstadoDemo, id: string): Mudanca<ResultadoPainel> {

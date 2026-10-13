@@ -14,11 +14,12 @@ fictícia: na demonstração online a reserva é simulada e nada é enviado.
 Agendamento online para pequenos negócios, com motor de disponibilidade e
 proteção contra conflitos no PostgreSQL.
 
-**Versão 0.6.0 · em desenvolvimento.** O cliente escolhe serviço, data e horário,
-confirma com nome e WhatsApp, e recebe um link pessoal para cancelar. O dono
-entra no painel para ver a agenda do dia, marcar quem veio ou faltou, enviar
-lembretes, agendar quem ligou, bloquear horários e configurar serviços,
-expediente e dados do negócio. Falta publicar com banco de produção.
+**Versão 0.7.0 · em desenvolvimento.** O cliente escolhe serviço, profissional
+(quando há mais de um), data e horário, confirma com nome e WhatsApp, e recebe
+um link pessoal para cancelar. O dono entra no painel para ver a agenda do dia,
+de todos ou de um profissional, marcar quem veio ou faltou, enviar lembretes,
+agendar quem ligou, bloquear horários e configurar serviços, profissionais,
+expediente e dados do negócio.
 A demonstração no GitHub Pages, com a página do cliente e o painel do dono, usa os
 mesmos componentes React e o mesmo motor de disponibilidade, com dados fictícios
 renovados a cada visita e sem servidor. A versão Next.js com PostgreSQL, que
@@ -55,11 +56,11 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 
 ## O que está pronto
 
-- Seis tabelas tipadas no Drizzle, com migrações versionadas.
+- Sete tabelas tipadas no Drizzle, com migrações versionadas.
 - Instantes em `timestamptz`, fuso separado e expediente em hora local.
-- Restrição no PostgreSQL contra sobreposição de reservas do mesmo negócio.
+- Restrição no PostgreSQL contra sobreposição de reservas do mesmo profissional.
 - Proteção transacional entre reservas e bloqueios, inclusive com concorrência.
-- Seed repetível de uma barbearia fictícia com três serviços e seis reservas futuras.
+- Seed repetível de uma barbearia fictícia com três serviços, dois barbeiros e seis reservas futuras.
 - Testes de integração que iniciam PostgreSQL real local, sem Docker ou Neon.
 - Motor puro de disponibilidade com testes de encaixes, virada de dia e horário de verão.
 - Página pública em `/[slug]`, com seleção de serviços, calendário de 14 dias e resumo.
@@ -78,6 +79,9 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
   a mensagem pronta para o WhatsApp.
 - Configurações em `/painel/configuracoes`: criar, editar e desativar serviços,
   definir o expediente da semana e alterar nome e WhatsApp do negócio.
+- Vários profissionais no mesmo negócio: cada um com a própria agenda, escolha
+  pelo cliente ou "tanto faz", bloqueio de todos ou de um só, filtro no painel e
+  cadastro em Configurações. Com um só profissional, as telas ficam como antes.
 - Cadastro de um negócio novo pela linha de comando (`pnpm negocio:criar`).
 - Demonstração estática do painel, com as mesmas telas e regras, em memória.
 
@@ -136,6 +140,10 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `src/agenda/horarios-livres.ts` | Calcula disponibilidade com dados recebidos, sem banco/rede/relógio global |
 | `tests/horarios-livres.test.ts` | Casos esperados de disponibilidade, fuso e entradas inválidas |
 | `scripts/demo-horarios.ts` | Exemplo reproduzível da agenda no terminal |
+| `drizzle/0003_varios_profissionais.sql` | Tabela de profissionais, exclusão por profissional e bloqueio de um ou de todos |
+| `src/agenda/disponibilidade.ts` | Horários livres por profissional e escolha de quem atende, sem banco |
+| `src/agenda/ocupacao.ts` | Leitura de profissionais, expediente, bloqueios e horários ocupados |
+| `tests/migracao-profissionais.test.ts` | Aplica a migração 0003 sobre um banco que já tem clientes marcados |
 | `src/agenda/pagina-publica.ts` | Consulta pública consistente, incluindo ocupações que atravessam a janela |
 | `app/[slug]/page.tsx` | Rota pública renderizada no servidor |
 | `app/components/agenda-publica.tsx` | Seleção de serviço, data e horário, formulário e confirmação |
@@ -152,13 +160,13 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `app/painel/` | Página do painel, Server Actions e conferência da sessão |
 | `app/components/painel-agenda.tsx` | Interface do painel, sem dependência do Next.js |
 | `tests/painel.test.ts` | Login, sessão, agenda, ações e isolamento entre negócios |
-| `src/painel/configuracao.ts` | Leitura e gravação de serviços, expediente e dados do negócio |
+| `src/painel/configuracao.ts` | Leitura e gravação de serviços, profissionais, expediente e dados do negócio |
 | `app/painel/configuracoes/page.tsx` | Página de configurações |
 | `app/components/painel-configuracoes.tsx` | Interface das configurações |
 | `app/components/painel-cabecalho.tsx` | Topo e abas comuns às telas do painel |
 | `src/db/negocios.ts` | Cadastro de um negócio com o acesso do dono |
 | `scripts/criar-negocio.ts` | Linha de comando do cadastro |
-| `tests/configuracao.test.ts` | Cadastro, serviços, expediente e isolamento entre negócios |
+| `tests/configuracao.test.ts` | Cadastro, serviços, profissionais, expediente e isolamento entre negócios |
 | `src/painel/demo.ts` | O painel em memória, para a demonstração sem servidor |
 | `demo/painel.tsx` | Entrada da demonstração estática do painel |
 | `tests/painel-demo.test.ts` | Regras da demonstração do painel |
@@ -274,6 +282,43 @@ vaga. Depois disso a página explica que o prazo terminou e oferece avisar o
 negócio pelo WhatsApp. Reservas já atendidas ou marcadas como falta não podem
 ser canceladas por ele. Para remarcar, cancela e escolhe outro horário.
 
+## Vários profissionais
+
+**Uma agenda por profissional.** Cada agendamento pertence a um profissional, e
+a exclusão GiST passou a valer por profissional: dois barbeiros atendem no mesmo
+horário, e nenhum deles fica com dois clientes ao mesmo tempo. O bloqueio pode
+ser de todos (almoço, feriado) ou de um só (folga, curso). O trigger confere os
+dois casos, nas duas direções.
+
+**Escolha do cliente.** Com mais de um profissional ativo, a página pergunta
+"Com quem você prefere?". Quem responde "tanto faz" vê todos os horários em que
+alguém está livre, e a reserva vai para quem tem menos atendimentos naquele dia
+(no empate, quem foi cadastrado primeiro). Quem escolhe um nome só vê e só
+disputa a agenda dele. Com um único profissional ativo essa pergunta não
+aparece, e a página, a confirmação e o painel ficam como eram.
+
+**Reservas em fila.** `reservarHorario` trava a linha do negócio no início da
+transação. As reservas de um mesmo negócio entram uma por vez, então a escolha
+de quem atende sempre enxerga a agenda atual. A exclusão e o trigger continuam
+no banco para qualquer gravação que não passe por essa função.
+
+**No painel.** A agenda do dia mostra com quem é cada horário e pode ser
+filtrada por profissional, com o resumo do dia acompanhando o filtro. O dono
+agenda com alguém específico ou com quem estiver livre, e bloqueia a agenda de
+todos ou de um. Em Configurações ele adiciona, renomeia e desativa
+profissionais. Desativar preserva o histórico, e é recusado para o último que
+atende e para quem ainda tem cliente confirmado pela frente.
+
+**Bancos que já existiam.** A migração 0003 cria um profissional chamado
+"Profissional" em cada negócio e entrega a ele todos os agendamentos; os
+bloqueios antigos continuam valendo para todos. O dono troca o nome em
+Configurações.
+
+**Limites desta versão.** Todos os profissionais fazem todos os serviços e
+seguem o horário de funcionamento do negócio; a folga de um deles é um
+bloqueio. Serviços por profissional, expediente individual e um login para
+cada profissional não fazem parte desta etapa.
+
 ## Painel do dono
 
 **Login sem biblioteca de autenticação.** O plano original citava Auth.js. Para
@@ -327,20 +372,21 @@ nome e WhatsApp ficam fixos.
 pnpm negocio:criar --nome "Barbearia do Zé" --telefone "(34) 99999-0000" --email dono@exemplo.com
 ```
 
-Cria o negócio e o acesso do dono, com expediente de segunda a sexta, das 9h às
-18h, e sem serviços. O endereço da página sai do nome (`barbearia-do-ze`), ou de
+Cria o negócio e o acesso do dono, com um profissional, expediente de segunda a
+sexta, das 9h às 18h, e sem serviços. O endereço da página sai do nome (`barbearia-do-ze`), ou de
 `--slug`. Sem `--senha`, uma senha é gerada e mostrada uma única vez: o banco
 guarda só o hash. Endereços usados pelo sistema (`painel`, `entrar`, `cancelar`
 e outros) são recusados. Depois disso, o dono entra em `/entrar` e completa
-serviços e horários em Configurações. Opcionais: `--slug`, `--senha`, `--fuso`.
+serviços, profissionais e horários em Configurações. Opcionais: `--slug`,
+`--senha`, `--fuso` e `--profissional` (o nome de quem atende).
 
 ## Validação desta etapa
 
-109 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
-pedido e da exibição de preço, 4 do painel de demonstração e 53 de integração
-com PostgreSQL real (17 das garantias do banco e da página pública, 12 de
-reserva e cancelamento, 14 do login e do painel, 10 do cadastro e das
-configurações).
+124 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
+pedido e da exibição de preço, 4 do painel de demonstração e 68 de integração
+com PostgreSQL real (20 das garantias do banco e da página pública, 18 de
+reserva e cancelamento, 16 do login e do painel, 12 do cadastro e das
+configurações, 2 da migração para vários profissionais).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -361,7 +407,10 @@ Os testes de reserva cobrem gravação, privacidade da página pública, dados
 inválidos, serviço inativo ou de outro negócio, horários que o motor não
 ofereceria, sobreposição parcial, bloqueio, cinco pedidos simultâneos para o
 mesmo horário (exatamente um vence), limite por telefone, cancelamento e o
-prazo de uma hora para cancelar.
+prazo de uma hora para cancelar. Com dois profissionais, cobrem dois clientes
+no mesmo horário, a escolha de um profissional, a distribuição de quem não tem
+preferência, profissional inativo ou de outro negócio, bloqueio de um só e
+cinco pedidos simultâneos (exatamente dois vencem, um com cada).
 
 O indicador de desenvolvimento do Next.js está desativado. Não há cursor
 personalizado na página. Em navegadores compatíveis, ferramentas WebMCP permitem
@@ -377,6 +426,7 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
    painel; cadastro de um negócio novo; demonstração pública do painel.~~
    Feito na 0.6.0.
 5. ~~Publicação com banco de produção.~~ No ar na Vercel com Neon desde a 0.6.0 (veja "Publicar na Vercel").
+6. ~~Vários profissionais no mesmo negócio.~~ Feito na 0.7.0.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
 

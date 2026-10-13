@@ -1,4 +1,4 @@
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema.js';
 import { ANTECEDENCIA_CANCELAMENTO_MIN } from './pedido-reserva.js';
@@ -28,7 +28,11 @@ export async function obterAgendamentoPorToken(db: Banco, token: string) {
     servicoNome: schema.servico.nome, duracaoMin: schema.servico.duracaoMin, precoCentavos: schema.servico.precoCentavos,
     negocioNome: schema.negocio.nome, negocioSlug: schema.negocio.slug, negocioTelefone: schema.negocio.telefone,
     fuso: schema.negocio.fuso, demonstracao: schema.negocio.demonstracao,
+    profissionalNome: schema.profissional.nome,
+    // Com um só profissional ativo, a tela não precisa dizer com quem é.
+    variosProfissionais: sql<boolean>`(select count(*) from profissional p where p.negocio_id = ${schema.agendamento.negocioId} and p.ativo) > 1`,
   }).from(schema.agendamento)
+    .innerJoin(schema.profissional, eq(schema.profissional.id, schema.agendamento.profissionalId))
     .innerJoin(schema.servico, eq(schema.servico.id, schema.agendamento.servicoId))
     .innerJoin(schema.negocio, eq(schema.negocio.id, schema.agendamento.negocioId))
     .where(eq(schema.agendamento.tokenCancelamentoHash, hashToken(token))).limit(1);

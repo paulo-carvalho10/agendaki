@@ -7,7 +7,8 @@ import { COOKIE_SESSAO, entrar, sair } from '../../src/auth/sessao.js';
 import { agendarPeloDono, criarBloqueio, mudarStatus, registrarLembrete, removerBloqueio,
   type PedidoBloqueio, type PedidoDoDono, type ResultadoPainel } from '../../src/painel/acoes.js';
 import type { StatusAgendamento } from '../../src/painel/agenda.js';
-import { definirServicoAtivo, salvarFuncionamento, salvarNegocio, salvarServico, type DadosServico, type DiaAberto } from '../../src/painel/configuracao.js';
+import { definirProfissionalAtivo, definirServicoAtivo, salvarFuncionamento, salvarNegocio, salvarProfissional, salvarServico,
+  type DadosProfissional, type DadosServico, type DiaAberto } from '../../src/painel/configuracao.js';
 import type { ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
 import { exigirSessao } from './sessao';
 
@@ -89,6 +90,20 @@ export async function salvarServicoAcao(dados: DadosServico): Promise<ResultadoP
 export async function definirServicoAtivoAcao(servicoId: string, ativo: boolean): Promise<ResultadoPainel> {
   const sessao = await exigirSessao();
   const resultado = await definirServicoAtivo(bancoServidor(), sessao.negocioId, servicoId, ativo);
+  revalidatePath('/painel', 'layout');
+  return resultado;
+}
+
+export async function salvarProfissionalAcao(dados: DadosProfissional): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await salvarProfissional(bancoServidor(), sessao.negocioId, dados);
+  revalidatePath('/painel', 'layout');
+  return resultado;
+}
+
+export async function definirProfissionalAtivoAcao(profissionalId: string, ativo: boolean): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await definirProfissionalAtivo(bancoServidor(), sessao.negocioId, profissionalId, ativo);
   revalidatePath('/painel', 'layout');
   return resultado;
 }

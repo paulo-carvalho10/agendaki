@@ -5,6 +5,7 @@ import * as schema from './schema.js';
 
 export const DEMO_ID = '00000000-0000-4000-8000-000000000001';
 export const DEMO_EMAIL = 'dono@barbearia.example';
+export const DEMO_PROFISSIONAIS = ['Caio', 'Diego'] as const;
 
 export async function seedDemo(db: PostgresJsDatabase<typeof schema>, senha: string) {
   if (senha.length < 12) throw new Error('DEMO_OWNER_PASSWORD precisa de pelo menos 12 caracteres.');
@@ -27,9 +28,16 @@ export async function seedDemo(db: PostgresJsDatabase<typeof schema>, senha: str
     await tx.execute(sql`delete from bloqueio where negocio_id = ${DEMO_ID}::uuid`);
     await tx.execute(sql`delete from horario_funcionamento where negocio_id = ${DEMO_ID}::uuid`);
     await tx.execute(sql`delete from servico where negocio_id = ${DEMO_ID}::uuid`);
+    await tx.execute(sql`delete from profissional where negocio_id = ${DEMO_ID}::uuid`);
     await tx.execute(sql`delete from usuario where negocio_id = ${DEMO_ID}::uuid`);
 
     await tx.insert(schema.usuario).values({ negocioId: DEMO_ID, email: DEMO_EMAIL, senhaHash });
+    // Dois barbeiros, para a demonstração mostrar a escolha de profissional.
+    // Na mesma transação o now() do banco é igual para os dois: a ordem de cadastro vem daqui.
+    const cadastro = Date.now();
+    const profissionais = await tx.insert(schema.profissional).values(
+      DEMO_PROFISSIONAIS.map((nome, i) => ({ negocioId: DEMO_ID, nome, criadoEm: new Date(cadastro + i) })),
+    ).returning();
     const servicos = await tx.insert(schema.servico).values([
       { negocioId: DEMO_ID, nome: 'Corte', duracaoMin: 30, precoCentavos: 4000 },
       { negocioId: DEMO_ID, nome: 'Barba', duracaoMin: 30, precoCentavos: 3000 },
@@ -62,18 +70,19 @@ export async function seedDemo(db: PostgresJsDatabase<typeof schema>, senha: str
       const dia = String(dias[Math.floor(i / 2)].dia);
       const hora = i % 2 === 0 ? '09:00' : '14:00';
       const servico = servicos[i % servicos.length];
+      const profissional = profissionais[i % profissionais.length];
       const token = randomBytes(32).toString('base64url');
       const tokenHash = createHash('sha256').update(token).digest('hex');
       await tx.execute(sql`
         insert into agendamento
-          (negocio_id, servico_id, cliente_nome, cliente_telefone, inicio, fim, token_cancelamento_hash)
-        values (${DEMO_ID}::uuid, ${servico.id}::uuid, ${`Cliente exemplo ${i + 1}`}, '00000000000',
+          (negocio_id, servico_id, profissional_id, cliente_nome, cliente_telefone, inicio, fim, token_cancelamento_hash)
+        values (${DEMO_ID}::uuid, ${servico.id}::uuid, ${profissional.id}::uuid, ${`Cliente exemplo ${i + 1}`}, '00000000000',
           (${dia}::date + ${hora}::time) at time zone 'America/Sao_Paulo',
           ((${dia}::date + ${hora}::time) at time zone 'America/Sao_Paulo') + make_interval(mins => ${servico.duracaoMin}),
           ${tokenHash})
       `);
       linksCancelamento.push(`/cancelar/${token}`);
     }
-    return { negocioId: DEMO_ID, servicos: 3, agendamentos: 6, bloqueios: dias.length, linksCancelamento };
+    return { negocioId: DEMO_ID, servicos: 3, profissionais: profissionais.length, agendamentos: 6, bloqueios: dias.length, linksCancelamento };
   });
 }

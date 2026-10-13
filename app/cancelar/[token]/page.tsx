@@ -23,6 +23,7 @@ export default async function Pagina({ params }: { params: Promise<{ token: stri
   const quando = `${new Intl.DateTimeFormat('pt-BR', { timeZone: agendamento.fuso, weekday: 'long', day: 'numeric', month: 'long' }).format(agendamento.inicio)}, às ${hora(agendamento.inicio)}`;
   const detalhes = <dl className="detalhes">
     <div><dt>Serviço</dt><dd>{agendamento.servicoNome} · {agendamento.duracaoMin} min</dd></div>
+    {agendamento.variosProfissionais && <div><dt>Com</dt><dd>{agendamento.profissionalNome}</dd></div>}
     <div><dt>Quando</dt><dd>{quando}</dd></div>
     <div><dt>Onde</dt><dd>{negocio}</dd></div>
     <div><dt>Valor</dt><dd>{reais.format(agendamento.precoCentavos / 100)} · pago no local</dd></div>

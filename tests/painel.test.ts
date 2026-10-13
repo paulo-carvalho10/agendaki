@@ -9,7 +9,7 @@ import type { ReservaConfirmada } from '../src/agenda/pedido-reserva.js';
 import { iniciarBancoTemporario } from './banco-temporario.js';
 
 let banco: Awaited<ReturnType<typeof iniciarBancoTemporario>>;
-type Negocio = { id: string; slug: string; servicoId: string; email: string; usuarioId: string };
+type Negocio = { id: string; slug: string; servicoId: string; email: string; usuarioId: string; profissionalId: string };
 let meu: Negocio;
 let vizinho: Negocio;
 
@@ -27,7 +27,11 @@ async function criarNegocio(nome: string): Promise<Negocio> {
     await banco.client`insert into horario_funcionamento (negocio_id, dia_semana, abre, fecha) values (${n.id}, ${dia}, '09:00', '18:00')`;
   }
   const [u] = await banco.client`insert into usuario (negocio_id, email, senha_hash) values (${n.id}, ${email}, ${gerarHashSenha(SENHA)}) returning id`;
-  return { id: n.id, slug, servicoId: s.id, email, usuarioId: u.id };
+  return { id: n.id, slug, servicoId: s.id, email, usuarioId: u.id, profissionalId: await novoProfissional(n.id, 'Caio') };
+}
+async function novoProfissional(negocioId: string, nome: string) {
+  const [p] = await banco.client`insert into profissional (negocio_id, nome) values (${negocioId}, ${nome}) returning id`;
+  return p.id as string;
 }
 const reservar = (negocio: Negocio, inicio: string, nome = 'Ana Souza', telefone = '(34) 99999-1234') =>
   reservarHorario(banco.db, { slug: negocio.slug, servicoId: negocio.servicoId, inicio, nome, telefone }, AGORA) as Promise<ReservaConfirmada>;
@@ -110,6 +114,8 @@ test('mostra os agendamentos do dia com os dados do cliente, só do próprio neg
     ['Bruno Lima', '34988880001', 'Corte', 'confirmado', '2030-01-07T13:00:00.000Z'],
   ]);
   expect(agenda!.resumo).toEqual({ confirmados: 2, atendidos: 0, faltas: 0, cancelados: 0, previstoCentavos: 8000, realizadoCentavos: 0 });
+  expect(agenda!.profissionais).toEqual([{ id: meu.profissionalId, nome: 'Caio' }]);
+  expect(agenda!.agendamentos.every((a) => a.profissionalId === meu.profissionalId && a.profissionalNome === 'Caio')).toBe(true);
   expect(JSON.stringify(agenda)).not.toMatch(/Cliente do Vizinho|Salão Vizinho/);
   // Os horários já marcados não aparecem como livres para o agendamento manual.
   const livres = agenda!.servicos[0].horarios.map((h) => h.inicio);
@@ -212,7 +218,7 @@ test('bloqueia um intervalo no fuso do negócio, recusa o que conflita e desfaz'
 
   expect(await criarBloqueio(banco.db, meu.id, { dia: '2030-01-07', das: '13:00', ate: '14:00', motivo: '  Dentista  ' })).toEqual({ ok: true });
   const agenda = (await obterAgendaDoDia(banco.db, meu.id, undefined, AGORA))!;
-  expect(agenda.bloqueios).toMatchObject([{ inicio: '2030-01-07T16:00:00.000Z', fim: '2030-01-07T17:00:00.000Z', motivo: 'Dentista' }]);
+  expect(agenda.bloqueios).toMatchObject([{ inicio: '2030-01-07T16:00:00.000Z', fim: '2030-01-07T17:00:00.000Z', motivo: 'Dentista', profissionalId: null, profissionalNome: null }]);
   expect(agenda.servicos[0].horarios.map((h) => h.inicio)).not.toContain('2030-01-07T16:00:00Z');
   // Com o bloqueio, a página pública também para de oferecer o intervalo.
   expect(await reservar(meu, '2030-01-07T16:30:00Z', 'Davi', '(34) 95555-0001')).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
@@ -232,4 +238,48 @@ test('o dono agenda sem limite por telefone e sem telefone, mas não em horário
   expect(await agendarPeloDono(banco.db, meu.id, { servicoId: vizinho.servicoId, inicio: '2030-01-07T14:00:00Z', nome: 'Eva', telefone: '' }, AGORA)).toMatchObject({ ok: false, motivo: 'servico_indisponivel' });
   // Na página pública, telefone vazio continua recusado.
   expect(await reservarHorario(banco.db, { slug: meu.slug, servicoId: meu.servicoId, inicio: '2030-01-07T14:00:00Z', nome: 'Eva', telefone: '' }, AGORA)).toMatchObject({ ok: false, motivo: 'dados_invalidos' });
+});
+
+// ---------- Vários profissionais ----------
+
+test('com dois profissionais, a agenda diz quem atende e quem está livre em cada horário', async () => {
+  const diego = await novoProfissional(meu.id, 'Diego');
+  const pedido = (inicio: string, nome: string, profissionalId?: string) =>
+    agendarPeloDono(banco.db, meu.id, { servicoId: meu.servicoId, inicio, nome, telefone: '', profissionalId }, AGORA);
+  expect(await pedido('2030-01-07T12:00:00Z', 'Ana', diego)).toMatchObject({ ok: true, profissional: { id: diego, nome: 'Diego' }, variosProfissionais: true });
+  expect(await pedido('2030-01-07T12:00:00Z', 'Bruno', '')).toMatchObject({ ok: true, profissional: { nome: 'Caio' } });
+  expect(await pedido('2030-01-07T12:00:00Z', 'Carla')).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
+  expect(await pedido('2030-01-07T12:30:00Z', 'Davi', diego)).toMatchObject({ ok: true });
+  // Profissional de outro negócio não atende aqui.
+  expect(await pedido('2030-01-07T13:00:00Z', 'Eva', vizinho.profissionalId)).toMatchObject({ ok: false, motivo: 'profissional_indisponivel' });
+
+  const agenda = (await obterAgendaDoDia(banco.db, meu.id, undefined, AGORA))!;
+  expect(agenda.profissionais).toEqual([{ id: meu.profissionalId, nome: 'Caio' }, { id: diego, nome: 'Diego' }]);
+  expect(agenda.agendamentos.map((a) => [a.clienteNome, a.profissionalNome])).toEqual([['Bruno', 'Caio'], ['Ana', 'Diego'], ['Davi', 'Diego']]);
+  const livres = agenda.servicos[0].horarios;
+  expect(livres.some((h) => h.inicio === '2030-01-07T12:00:00Z')).toBe(false);
+  expect(livres.find((h) => h.inicio === '2030-01-07T12:30:00Z')!.profissionais).toEqual([meu.profissionalId]);
+  expect(livres.find((h) => h.inicio === '2030-01-07T13:00:00Z')!.profissionais).toEqual([meu.profissionalId, diego]);
+  expect(JSON.stringify(agenda)).not.toContain(vizinho.profissionalId);
+});
+
+test('o bloqueio pode fechar a agenda de um profissional só', async () => {
+  const diego = await novoProfissional(meu.id, 'Diego');
+  const bloqueio = (profissionalId?: string | null, das = '09:00', ate = '10:00') =>
+    criarBloqueio(banco.db, meu.id, { dia: '2030-01-07', das, ate, motivo: 'Folga', profissionalId });
+  await agendarPeloDono(banco.db, meu.id, { servicoId: meu.servicoId, inicio: '2030-01-07T12:00:00Z', nome: 'Ana', telefone: '', profissionalId: meu.profissionalId }, AGORA);
+  // Caio tem cliente às 9h: a agenda dele e a de todos não fecham; a do Diego, sim.
+  expect(await bloqueio(meu.profissionalId)).toMatchObject({ ok: false });
+  expect(await bloqueio()).toMatchObject({ ok: false });
+  expect(await bloqueio(diego)).toEqual({ ok: true });
+  expect(await bloqueio(vizinho.profissionalId, '14:00', '15:00')).toEqual({ ok: false, mensagem: 'Profissional não encontrado.' });
+  expect(await bloqueio('nao-e-uuid', '14:00', '15:00')).toEqual({ ok: false, mensagem: 'Profissional não encontrado.' });
+  expect(await bloqueio(null, '14:00', '15:00')).toEqual({ ok: true });
+
+  const agenda = (await obterAgendaDoDia(banco.db, meu.id, undefined, AGORA))!;
+  expect(agenda.bloqueios.map((b) => [b.profissionalNome, b.inicio])).toEqual([['Diego', '2030-01-07T12:00:00.000Z'], [null, '2030-01-07T17:00:00.000Z']]);
+  const livres = agenda.servicos[0].horarios;
+  expect(livres.find((h) => h.inicio === '2030-01-07T12:30:00Z')!.profissionais).toEqual([meu.profissionalId]);
+  expect(livres.some((h) => h.inicio === '2030-01-07T17:00:00Z')).toBe(false);
+  expect(await reservar(meu, '2030-01-07T12:30:00Z', 'Bruno', '(34) 98888-0001')).toMatchObject({ ok: true, profissional: { nome: 'Caio' } });
 });

@@ -19,14 +19,16 @@ export function gerarSlug(nome: string) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
 }
 
-export type NovoNegocio = Readonly<{ nome: string; telefone: string; email: string; slug?: string; senha?: string; fuso?: string }>;
+/** `profissional` é o nome de quem atende; sem ele, o primeiro profissional se chama "Profissional". */
+export type NovoNegocio = Readonly<{ nome: string; telefone: string; email: string; slug?: string; senha?: string; fuso?: string; profissional?: string }>;
 export type ResultadoNovoNegocio =
   | { ok: true; negocioId: string; slug: string; email: string; /** Mostrada uma única vez: o banco guarda só o hash. */ senha: string }
   | { ok: false; mensagem: string };
 
 /**
- * Cadastra um negócio e o acesso do dono. Começa com expediente de segunda a
- * sexta, das 9h às 18h, e sem serviços: o dono ajusta os dois pelo painel.
+ * Cadastra um negócio e o acesso do dono. Começa com um profissional,
+ * expediente de segunda a sexta, das 9h às 18h, e sem serviços: o dono ajusta
+ * tudo pelo painel.
  */
 export async function criarNegocio(db: Banco, dados: NovoNegocio): Promise<ResultadoNovoNegocio> {
   const recusa = (mensagem: string) => ({ ok: false as const, mensagem });
@@ -42,11 +44,14 @@ export async function criarNegocio(db: Banco, dados: NovoNegocio): Promise<Resul
   if ((SLUGS_RESERVADOS as readonly string[]).includes(slug)) return recusa(`O endereço "${slug}" é usado pelo sistema. Escolha outro.`);
   const senha = dados.senha ?? randomBytes(9).toString('base64url');
   if (senha.length < SENHA_MINIMA || senha.length > 200) return recusa(`A senha precisa ter pelo menos ${SENHA_MINIMA} caracteres.`);
+  const profissional = normalizarNome(dados.profissional ?? 'Profissional');
+  if (profissional.length < 2 || profissional.length > 60) return recusa('O nome do profissional precisa ter de 2 a 60 letras.');
 
   try {
     return await db.transaction(async (tx) => {
       const [negocio] = await tx.insert(schema.negocio).values({ nome, slug, telefone, ...(dados.fuso ? { fuso: dados.fuso } : {}) }).returning({ id: schema.negocio.id });
       await tx.insert(schema.usuario).values({ negocioId: negocio.id, email, senhaHash: gerarHashSenha(senha) });
+      await tx.insert(schema.profissional).values({ negocioId: negocio.id, nome: profissional });
       await tx.insert(schema.horarioFuncionamento).values([1, 2, 3, 4, 5].map((diaSemana) => ({ negocioId: negocio.id, diaSemana, abre: '09:00', fecha: '18:00' })));
       return { ok: true as const, negocioId: negocio.id, slug, email, senha };
     });

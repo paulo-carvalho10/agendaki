@@ -9,6 +9,8 @@ const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 function dataTexto(data: string, options: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('pt-BR', { ...options, timeZone: 'UTC' }).format(new Date(`${data}T12:00:00Z`));
 }
+type Servico = PaginaPublica['servicos'][number];
+type Horario = Servico['horarios'][number];
 type Props = {
   dados: PaginaPublica;
   homeHref?: string;
@@ -23,13 +25,16 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
   const inicial = dados.servicos.find((s) => s.nome === 'Corte') ?? dados.servicos[0];
   const [servicoId, setServico] = useState(inicial?.id);
   const [dia, setDia] = useState(inicial?.horarios[0]?.dataLocal ?? dados.dias[0]);
+  /** Vazio: o cliente não tem preferência de profissional. */
+  const [profissionalId, setProfissional] = useState('');
   const [selecionado, setSelecionado] = useState<string | null>(null);
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
   const [isca, setIsca] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [ocupados, setOcupados] = useState<string[]>([]);
+  /** Horários que esta página já viu serem recusados; `profissionalId` vazio vale para todos. */
+  const [ocupados, setOcupados] = useState<{ inicio: string; profissionalId: string }[]>([]);
   const [confirmada, setConfirmada] = useState<ReservaConfirmada | null>(null);
   const [copiado, setCopiado] = useState(false);
   useEffect(() => {
@@ -38,7 +43,7 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
     if (!context?.registerTool) return;
     const lifecycle = new AbortController();
     const tools: Tool[] = [
-      { name: 'consultar_disponibilidade', description: 'Lista serviços e horários disponíveis nesta consulta; não cria reservas.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute: () => ({ servicos: dados.servicos, atualizadoEm: dados.atualizadoEm }) },
+      { name: 'consultar_disponibilidade', description: 'Lista serviços e horários disponíveis nesta consulta; não cria reservas.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute: () => ({ profissionais: dados.profissionais, servicos: dados.servicos, atualizadoEm: dados.atualizadoEm }) },
       { name: 'selecionar_horario', description: 'Seleciona serviço e horário no resumo visível. Não confirma nem grava uma reserva.',
         inputSchema: { type: 'object', properties: { servicoId: { type: 'string' }, inicioUTC: { type: 'string' } }, required: ['servicoId', 'inicioUTC'], additionalProperties: false }, annotations: { readOnlyHint: false },
         execute: (input) => {
@@ -46,7 +51,7 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
           const s = dados.servicos.find((item) => item.id === input.servicoId);
           const h = s?.horarios.find((item) => item.inicio === input.inicioUTC);
           if (!s || !h) throw new Error('Horário não disponível para esse serviço.');
-          flushSync(() => { setServico(s.id); setDia(h.dataLocal); setSelecionado(h.inicio); });
+          flushSync(() => { setServico(s.id); setDia(h.dataLocal); setSelecionado(h.inicio); setProfissional((atual) => (h.profissionais.includes(atual) ? atual : '')); });
           return { servico: s.nome, inicio: h.inicio, fim: h.fim, reservaConfirmada: false };
         },
       },
@@ -57,8 +62,16 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
     }
     return () => lifecycle.abort();
   }, [dados]);
+  // Com um só profissional a página não pergunta "com quem" e fica como sempre foi.
+  const varios = dados.profissionais.length > 1;
+  const escolhido = dados.profissionais.find((p) => p.id === profissionalId);
+  const livresEm = (h: Horario) => h.profissionais.filter((p) => !ocupados.some((o) => o.inicio === h.inicio && (!o.profissionalId || o.profissionalId === p)));
+  /** Horários de um serviço que ainda valem para quem o cliente escolheu. */
+  const oferecidos = (s: Servico | undefined, quem = profissionalId) => s?.horarios.filter((h) => (quem ? livresEm(h).includes(quem) : livresEm(h).length > 0)) ?? [];
   const servico = dados.servicos.find((s) => s.id === servicoId);
-  const horarios = servico?.horarios.filter((h) => h.dataLocal === dia && !ocupados.includes(h.inicio)) ?? [];
+  const doServico = oferecidos(servico);
+  const horarios = doServico.filter((h) => h.dataLocal === dia);
+  const passo = (n: number) => String(n + (varios ? 1 : 0)).padStart(2, '0');
   const horario = horarios.find((h) => h.inicio === selecionado);
   const hora = (iso: string) => new Intl.DateTimeFormat('pt-BR', { timeZone: dados.negocio.fuso, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
   const offset = (iso: string) => new Intl.DateTimeFormat('pt-BR', { timeZone: dados.negocio.fuso, timeZoneName: 'shortOffset' }).formatToParts(new Date(iso)).find((p) => p.type === 'timeZoneName')?.value;
@@ -66,7 +79,8 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
   async function confirmar(evento: React.FormEvent) {
     evento.preventDefault();
     if (!aoReservar || !servico || !horario || enviando) return;
-    const pedido: PedidoReserva = { slug: dados.negocio.slug, servicoId: servico.id, inicio: horario.inicio, nome, telefone, site: isca };
+    const pedido: PedidoReserva = { slug: dados.negocio.slug, servicoId: servico.id, inicio: horario.inicio, nome, telefone, site: isca,
+      ...(profissionalId ? { profissionalId } : {}) };
     if (!validarPedido(pedido, { servicoIdLivre: true })) { setErro(mensagensRecusa.dados_invalidos); return; }
     setEnviando(true); setErro(null);
     try {
@@ -74,15 +88,20 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
       if (resultado.ok) { setConfirmada(resultado); window.scrollTo({ top: 0 }); }
       else {
         setErro(resultado.mensagem);
-        if (resultado.motivo === 'horario_indisponivel') { setOcupados((lista) => [...lista, horario.inicio]); setSelecionado(null); }
+        if (resultado.motivo === 'horario_indisponivel') { setOcupados((lista) => [...lista, { inicio: horario.inicio, profissionalId }]); setSelecionado(null); }
       }
     } catch { setErro('Não foi possível confirmar agora. Confira sua conexão e tente de novo.'); }
     finally { setEnviando(false); }
   }
   function trocarServico(id: string) {
     setServico(id); setSelecionado(null); setErro(null);
-    const novo = dados.servicos.find((s) => s.id === id);
-    if (!novo?.horarios.some((h) => h.dataLocal === dia)) setDia(novo?.horarios[0]?.dataLocal ?? dados.dias[0]);
+    const lista = oferecidos(dados.servicos.find((s) => s.id === id));
+    if (!lista.some((h) => h.dataLocal === dia)) setDia(lista[0]?.dataLocal ?? dados.dias[0]);
+  }
+  function trocarProfissional(id: string) {
+    setProfissional(id); setSelecionado(null); setErro(null);
+    const lista = oferecidos(servico, id);
+    if (!lista.some((h) => h.dataLocal === dia) && lista.length) setDia(lista[0].dataLocal);
   }
   return <div className="site">
     <header className="topo"><a className="marca" href={homeHref}>agendaki<span aria-hidden="true">✳</span></a><span className="topo-texto">Um tempo só seu.</span>{dados.negocio.demonstracao && <span className="selo">Demonstração</span>}</header>
@@ -102,10 +121,16 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
             {dados.servicos.map((s) => <button key={s.id} className={`servico ${s.id === servicoId ? 'ativo' : ''}`} aria-pressed={s.id === servicoId} onClick={() => trocarServico(s.id)}><span className="servico-topo"><strong>{s.nome}</strong><span className="radio" aria-hidden="true">{s.id === servicoId ? '✓' : ''}</span></span><span className="duracao">{s.duracaoMin} min</span><span className="preco">{reais.format(s.precoCentavos / 100)}</span></button>)}
           </div>}
         </section>
-        {servico && <><section aria-labelledby="dias-titulo"><div className="titulo-secao"><span className="numero">02</span><h2 id="dias-titulo">Quando você quer vir?</h2></div>
+        {servico && <>{varios && <section aria-labelledby="profissional-titulo"><div className="titulo-secao"><span className="numero">02</span><h2 id="profissional-titulo">Com quem você prefere?</h2></div>
+          <div className="profissionais" role="group" aria-label="Profissional">
+            <button className={`profissional ${profissionalId === '' ? 'ativo' : ''}`} aria-pressed={profissionalId === ''} onClick={() => trocarProfissional('')}>Tanto faz<small>Quem estiver livre</small></button>
+            {dados.profissionais.map((p) => <button key={p.id} className={`profissional ${p.id === profissionalId ? 'ativo' : ''}`} aria-pressed={p.id === profissionalId} onClick={() => trocarProfissional(p.id)}>{p.nome}<small>{oferecidos(servico, p.id).length ? 'Tem horário' : 'Sem horário livre'}</small></button>)}
+          </div>
+        </section>}
+        <section aria-labelledby="dias-titulo"><div className="titulo-secao"><span className="numero">{passo(2)}</span><h2 id="dias-titulo">Quando você quer vir?</h2></div>
           <p className="mes">{dataTexto(dia, { month: 'long', year: 'numeric' })}<span>Próximos 14 dias</span></p>
           <div className="dias" role="group" aria-label="Data do atendimento">{dados.dias.map((d) => {
-            const tem = servico.horarios.some((h) => h.dataLocal === d);
+            const tem = doServico.some((h) => h.dataLocal === d);
             return <button key={d} aria-pressed={dia === d} aria-label={`${dataTexto(d, { weekday: 'long', day: 'numeric', month: 'long' })}${tem ? '' : ', sem horários'}`} className={`dia ${dia === d ? 'ativo' : ''} ${tem ? '' : 'sem-horarios'}`} onClick={() => { setDia(d); setSelecionado(null); setErro(null); }}><span>{dataTexto(d, { weekday: 'short' }).replace('.', '')}</span><strong>{d.slice(-2)}</strong><small>{d === dados.dias[0] ? 'Hoje' : dataTexto(d, { month: 'short' }).replace('.', '')}</small></button>;
           })}</div>
           <div className="horarios-topo"><h3>Horários disponíveis</h3><span>{horarios.length} opções</span></div>
@@ -113,11 +138,11 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
             const repetido = horarios.filter((outro) => hora(outro.inicio) === hora(h.inicio)).length > 1;
             return <button key={h.inicio} className={`horario ${selecionado === h.inicio ? 'ativo' : ''}`} aria-pressed={selecionado === h.inicio} onClick={() => { setSelecionado(h.inicio); setErro(null); }}>{hora(h.inicio)}{repetido && <small>{offset(h.inicio)}</small>}</button>;
           })}</div>
-          {horarios.length === 0 && <p className="vazio">Nenhum horário livre nesta data. Escolha outro dia no calendário.</p>}
+          {horarios.length === 0 && <p className="vazio">{escolhido ? `${escolhido.nome} não tem horário livre nesta data. Escolha outro dia ou outro profissional.` : 'Nenhum horário livre nesta data. Escolha outro dia no calendário.'}</p>}
         </section>
-        <section className="resumo" aria-live="polite" aria-label="Sua escolha"><div><span className="sobretitulo">SUA ESCOLHA</span><h3>{servico.nome} <span>· {servico.duracaoMin} min</span></h3><p>{horario ? `${dataTexto(dia, { day: 'numeric', month: 'long' })}, ${hora(horario.inicio)}–${hora(horario.fim)} (${offset(horario.inicio)})` : 'Selecione um horário para conferir os detalhes.'}</p></div><strong className="resumo-preco">{reais.format(servico.precoCentavos / 100)}</strong></section>
+        <section className="resumo" aria-live="polite" aria-label="Sua escolha"><div><span className="sobretitulo">SUA ESCOLHA</span><h3>{servico.nome} <span>· {servico.duracaoMin} min{varios ? ` · com ${escolhido ? escolhido.nome : 'quem estiver livre'}` : ''}</span></h3><p>{horario ? `${dataTexto(dia, { day: 'numeric', month: 'long' })}, ${hora(horario.inicio)}–${hora(horario.fim)} (${offset(horario.inicio)})` : 'Selecione um horário para conferir os detalhes.'}</p></div><strong className="resumo-preco">{reais.format(servico.precoCentavos / 100)}</strong></section>
         {!aoReservar ? <p className="consulta">Consulta de disponibilidade. A seleção de um horário ainda não confirma uma reserva.</p>
-        : horario ? <section aria-labelledby="dados-titulo"><div className="titulo-secao"><span className="numero">03</span><h2 id="dados-titulo">Para quem é o horário?</h2></div>
+        : horario ? <section aria-labelledby="dados-titulo"><div className="titulo-secao"><span className="numero">{passo(3)}</span><h2 id="dados-titulo">Para quem é o horário?</h2></div>
           <form className="dados" onSubmit={confirmar} noValidate>
             <label className="campo"><span>Seu nome</span><input name="nome" value={nome} onChange={(e) => setNome(e.target.value)} autoComplete="name" maxLength={80} required /></label>
             <label className="campo"><span>WhatsApp com DDD</span><input name="telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} type="tel" inputMode="tel" autoComplete="tel-national" placeholder="(34) 99999-9999" maxLength={20} required /></label>
@@ -130,7 +155,7 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
         <div className="atualizacao"><span>Consultado às {hora(dados.atualizadoEm)}</span><button onClick={() => window.location.reload()}>Consultar novamente <span aria-hidden="true">↻</span></button></div>
       </div>}
     </main>
-    <footer><span>Seu horário. Sem complicação.</span><span>Feito com <b>agendaki</b> · v0.6.0</span></footer>
+    <footer><span>Seu horário. Sem complicação.</span><span>Feito com <b>agendaki</b> · v0.7.0</span></footer>
   </div>;
 }
 
@@ -138,7 +163,8 @@ function Confirmacao({ reserva, dataHora, rotaCancelamento, copiado, aoCopiar }:
   reserva: ReservaConfirmada; dataHora: (iso: string) => string; rotaCancelamento: string | null; copiado: boolean; aoCopiar: () => void;
 }) {
   const primeiroNome = reserva.cliente.nome.split(' ')[0];
-  const mensagem = `Olá! Agendei ${reserva.servico.nome.toLowerCase()} para ${dataHora(reserva.inicio)}, pelo Agendaki. Meu nome é ${reserva.cliente.nome}.`;
+  const comQuem = reserva.variosProfissionais ? ` com ${reserva.profissional.nome}` : '';
+  const mensagem = `Olá! Agendei ${reserva.servico.nome.toLowerCase()}${comQuem} para ${dataHora(reserva.inicio)}, pelo Agendaki. Meu nome é ${reserva.cliente.nome}.`;
   const telefoneNegocio = normalizarTelefone(reserva.negocio.telefone);
   const link = rotaCancelamento && typeof window !== 'undefined' ? `${window.location.origin}${rotaCancelamento}${reserva.tokenCancelamento}` : null;
   // Reserva feita em cima da hora já nasce fora do prazo de cancelamento.
@@ -152,6 +178,7 @@ function Confirmacao({ reserva, dataHora, rotaCancelamento, copiado, aoCopiar }:
     <h2>Tudo certo, {primeiroNome}. Seu horário está reservado.</h2>
     <dl className="detalhes">
       <div><dt>Serviço</dt><dd>{reserva.servico.nome} · {reserva.servico.duracaoMin} min</dd></div>
+      {reserva.variosProfissionais && <div><dt>Com</dt><dd>{reserva.profissional.nome}</dd></div>}
       <div><dt>Quando</dt><dd>{dataHora(reserva.inicio)}</dd></div>
       <div><dt>Onde</dt><dd>{reserva.negocio.nome.replace(' — demonstração', '')}</dd></div>
       <div><dt>Valor</dt><dd>{reais.format(reserva.servico.precoCentavos / 100)} · pago no local</dd></div>

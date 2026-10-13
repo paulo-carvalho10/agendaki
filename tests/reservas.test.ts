@@ -11,6 +11,7 @@ let negocioId: string;
 let slug: string;
 let servicoId: string;
 let servicoLongoId: string;
+let caioId: string;
 
 // Segunda-feira, 8h em São Paulo. O negócio de teste abre todos os dias, 9h–18h.
 const AGORA = new Date('2030-01-07T11:00:00Z');
@@ -28,11 +29,16 @@ beforeEach(async () => {
   const [curto] = await banco.client`insert into servico (negocio_id, nome, duracao_min, preco_centavos) values (${negocioId}, 'Corte', 30, 4000) returning id`;
   const [longo] = await banco.client`insert into servico (negocio_id, nome, duracao_min, preco_centavos) values (${negocioId}, 'Corte + barba', 60, 6500) returning id`;
   servicoId = curto.id; servicoLongoId = longo.id;
+  caioId = await novoProfissional('Caio');
   for (let dia = 0; dia <= 6; dia++) {
     await banco.client`insert into horario_funcionamento (negocio_id, dia_semana, abre, fecha) values (${negocioId}, ${dia}, '09:00', '18:00')`;
   }
 });
 
+async function novoProfissional(nome: string, negocio = negocioId) {
+  const [p] = await banco.client`insert into profissional (negocio_id, nome) values (${negocio}, ${nome}) returning id`;
+  return p.id as string;
+}
 const pedido = (extra: Partial<PedidoReserva> = {}): PedidoReserva =>
   ({ slug, servicoId, inicio: NOVE, nome: 'Ana Souza', telefone: '(34) 99999-1234', ...extra });
 const reservar = (extra: Partial<PedidoReserva> = {}, agora = AGORA) => reservarHorario(banco.db, pedido(extra), agora);
@@ -45,11 +51,13 @@ test('grava a reserva confirmada, com fim calculado e só o hash do token', asyn
   expect(r.fim).toBe('2030-01-07T12:30:00.000Z');
   expect(r.servico).toEqual({ nome: 'Corte', duracaoMin: 30, precoCentavos: 4000 });
   expect(r.negocio).toMatchObject({ nome: 'Barbearia Teste', telefone: '3433334444', demonstracao: false });
+  expect(r.profissional).toEqual({ id: caioId, nome: 'Caio' });
+  expect(r.variosProfissionais).toBe(false);
   expect(r.tokenCancelamento).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
   const [linha] = await agendamentos();
   expect(linha).toMatchObject({ cliente_nome: 'Ana Souza', cliente_telefone: '34999991234', status: 'confirmado',
-    servico_id: servicoId, token_cancelamento_hash: hashToken(r.tokenCancelamento) });
+    servico_id: servicoId, profissional_id: caioId, token_cancelamento_hash: hashToken(r.tokenCancelamento) });
   expect(linha.token_cancelamento_hash).not.toContain(r.tokenCancelamento);
 });
 
@@ -133,7 +141,8 @@ test('o link de cancelamento mostra só o agendamento do dono do link', async ()
   const r = await reservar() as ReservaConfirmada;
   const visto = await obterAgendamentoPorToken(banco.db, r.tokenCancelamento);
   expect(visto).toMatchObject({ status: 'confirmado', clienteNome: 'Ana Souza', servicoNome: 'Corte',
-    duracaoMin: 30, precoCentavos: 4000, negocioNome: 'Barbearia Teste', negocioSlug: slug });
+    duracaoMin: 30, precoCentavos: 4000, negocioNome: 'Barbearia Teste', negocioSlug: slug,
+    profissionalNome: 'Caio', variosProfissionais: false });
   expect(visto!.inicio.toISOString()).toBe('2030-01-07T12:00:00.000Z');
   expect(JSON.stringify(visto)).not.toContain('34999991234');
   expect(await obterAgendamentoPorToken(banco.db, 'x'.repeat(43))).toBeNull();
@@ -176,4 +185,87 @@ test('não cancela o que já começou nem o que o dono já encerrou', async () =
   await banco.client`update agendamento set status = 'atendido' where token_cancelamento_hash = ${hashToken(atendido.tokenCancelamento)}`;
   expect(await cancelarPorToken(banco.db, atendido.tokenCancelamento, AGORA)).toEqual({ ok: false, motivo: 'encerrado' });
   expect((await agendamentos()).map((a) => a.status)).toEqual(['confirmado', 'atendido']);
+});
+
+// ---------- Vários profissionais ----------
+
+test('com dois profissionais, o mesmo horário recebe dois clientes, um com cada', async () => {
+  const diego = await novoProfissional('Diego');
+  const a = await reservar() as ReservaConfirmada;
+  const b = await reservar({ telefone: '(34) 98888-0001' }) as ReservaConfirmada;
+  expect([a.profissional, b.profissional]).toEqual([{ id: caioId, nome: 'Caio' }, { id: diego, nome: 'Diego' }]);
+  expect(a.variosProfissionais).toBe(true);
+  expect(await reservar({ telefone: '(34) 98888-0002' })).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
+
+  const pagina = await obterPaginaPublica(banco.db, slug, AGORA);
+  expect(pagina!.profissionais).toEqual([{ id: caioId, nome: 'Caio' }, { id: diego, nome: 'Diego' }]);
+  const horarios = pagina!.servicos[0].horarios;
+  expect(horarios.some((h) => h.inicio === NOVE)).toBe(false);
+  expect(horarios.find((h) => h.inicio === NOVE_E_MEIA)!.profissionais).toEqual([caioId, diego]);
+  // O link de cancelamento diz com quem é.
+  expect(await obterAgendamentoPorToken(banco.db, b.tokenCancelamento)).toMatchObject({ profissionalNome: 'Diego', variosProfissionais: true });
+});
+
+test('quem escolhe o profissional só disputa a agenda dele', async () => {
+  const diego = await novoProfissional('Diego');
+  expect(await reservar({ profissionalId: diego })).toMatchObject({ ok: true, profissional: { id: diego, nome: 'Diego' } });
+  // Diego está ocupado às 9h; Caio continua livre, mas o cliente pediu o Diego.
+  expect(await reservar({ profissionalId: diego, telefone: '(34) 98888-0001' })).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
+  const pagina = await obterPaginaPublica(banco.db, slug, AGORA);
+  expect(pagina!.servicos[0].horarios.find((h) => h.inicio === NOVE)!.profissionais).toEqual([caioId]);
+  expect(await reservar({ profissionalId: caioId, telefone: '(34) 98888-0001' })).toMatchObject({ ok: true, profissional: { nome: 'Caio' } });
+  expect((await agendamentos()).map((a) => a.profissional_id).sort()).toEqual([caioId, diego].sort());
+});
+
+test('sem preferência, a reserva vai para quem tem menos atendimentos no dia', async () => {
+  const diego = await novoProfissional('Diego');
+  const com = async (extra: Partial<PedidoReserva>) => (await reservar(extra) as ReservaConfirmada).profissional.nome;
+  expect(await com({ profissionalId: caioId })).toBe('Caio');
+  // Caio já tem um cliente no dia: o próximo, em outro horário, vai para o Diego.
+  expect(await com({ inicio: DEZ, telefone: '(34) 98888-0001' })).toBe('Diego');
+  // Empatados, fica com quem foi cadastrado primeiro.
+  expect(await com({ inicio: NOVE_E_MEIA, telefone: '(34) 98888-0002' })).toBe('Caio');
+  // O atendimento de outro dia não pesa na conta de hoje.
+  expect(await com({ inicio: '2030-01-08T12:00:00Z', telefone: '(34) 98888-0003' })).toBe('Caio');
+  expect(diego).toBeTruthy();
+});
+
+test('recusa profissional inativo, de outro negócio ou com identificador inválido', async () => {
+  const diego = await novoProfissional('Diego');
+  await banco.client`update profissional set ativo = false where id = ${diego}`;
+  const [outro] = await banco.client`insert into negocio (nome, slug, telefone) values ('Outro', ${`outro-${randomUUID()}`}, '3433335555') returning id`;
+  const alheio = await novoProfissional('Alheio', outro.id);
+  expect(await reservar({ profissionalId: diego })).toMatchObject({ ok: false, motivo: 'profissional_indisponivel' });
+  expect(await reservar({ profissionalId: alheio })).toMatchObject({ ok: false, motivo: 'profissional_indisponivel' });
+  expect(await reservar({ profissionalId: 'diego' })).toMatchObject({ ok: false, motivo: 'dados_invalidos' });
+  expect(await reservar({ profissionalId: 42 as never })).toMatchObject({ ok: false, motivo: 'dados_invalidos' });
+  expect(await agendamentos()).toHaveLength(0);
+  // O inativo some da página, que volta a se comportar como a de um profissional só.
+  const pagina = await obterPaginaPublica(banco.db, slug, AGORA);
+  expect(pagina!.profissionais).toEqual([{ id: caioId, nome: 'Caio' }]);
+  // Campo vazio é "sem preferência".
+  expect(await reservar({ profissionalId: '' })).toMatchObject({ ok: true, profissional: { nome: 'Caio' }, variosProfissionais: false });
+  expect(await reservar({ telefone: '(34) 98888-0001' })).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
+});
+
+test('o bloqueio de um profissional deixa o outro disponível', async () => {
+  const diego = await novoProfissional('Diego');
+  await banco.client`insert into bloqueio (negocio_id, profissional_id, inicio, fim, motivo) values (${negocioId}, ${caioId}, '2030-01-07T15:00:00Z', '2030-01-07T16:00:00Z', 'Folga do Caio')`;
+  const pagina = await obterPaginaPublica(banco.db, slug, AGORA);
+  expect(pagina!.servicos[0].horarios.find((h) => h.inicio === '2030-01-07T15:30:00Z')!.profissionais).toEqual([diego]);
+  expect(JSON.stringify(pagina)).not.toContain('Folga do Caio');
+  expect(await reservar({ inicio: '2030-01-07T15:30:00Z', profissionalId: caioId })).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
+  expect(await reservar({ inicio: '2030-01-07T15:30:00Z' })).toMatchObject({ ok: true, profissional: { nome: 'Diego' } });
+  // O bloqueio sem profissional vale para os dois.
+  await banco.client`insert into bloqueio (negocio_id, inicio, fim, motivo) values (${negocioId}, '2030-01-07T17:00:00Z', '2030-01-07T18:00:00Z', 'Reunião')`;
+  expect(await reservar({ inicio: '2030-01-07T17:00:00Z', telefone: '(34) 98888-0001' })).toMatchObject({ ok: false, motivo: 'horario_indisponivel' });
+});
+
+test('em uma disputa pelo mesmo horário com dois profissionais, exatamente dois pedidos vencem', async () => {
+  const diego = await novoProfissional('Diego');
+  const telefones = ['(34) 97777-0001', '(34) 97777-0002', '(34) 97777-0003', '(34) 97777-0004', '(34) 97777-0005'];
+  const resultados = await Promise.all(telefones.map((telefone) => reservar({ telefone })));
+  expect(resultados.filter((r) => r.ok)).toHaveLength(2);
+  expect(resultados.filter((r) => !r.ok).every((r) => !r.ok && r.motivo === 'horario_indisponivel')).toBe(true);
+  expect((await agendamentos()).map((a) => a.profissional_id).sort()).toEqual([caioId, diego].sort());
 });

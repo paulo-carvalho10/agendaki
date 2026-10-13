@@ -1,9 +1,9 @@
 import { Temporal } from '@js-temporal/polyfill';
-import { and, asc, eq, gt, gte, lt, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, lt } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema.js';
-import { calcularHorariosLivres } from '../agenda/horarios-livres.js';
-import { PASSO_GRADE_MIN } from '../agenda/pedido-reserva.js';
+import { horariosLivresPorProfissional, type HorarioLivre } from '../agenda/disponibilidade.js';
+import { lerOcupacao } from '../agenda/ocupacao.js';
 
 type Banco = PostgresJsDatabase<typeof schema>;
 /** Até onde o dono navega para trás e para a frente a partir de hoje. */
@@ -21,8 +21,9 @@ const DIA = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Tudo o que a tela do dono mostra para um dia: agendamentos com os dados do
- * cliente, bloqueios, horários ainda livres e os lembretes do próximo dia com
- * clientes marcados. Sempre restrito ao negócio informado.
+ * cliente e de quem atende, bloqueios, horários ainda livres por profissional
+ * e os lembretes do próximo dia com clientes marcados. Sempre restrito ao
+ * negócio informado.
  */
 export async function obterAgendaDoDia(db: Banco, negocioId: string, diaPedido?: string, agora = new Date()) {
   return db.transaction(async (tx) => {
@@ -45,56 +46,44 @@ export async function obterAgendaDoDia(db: Banco, negocioId: string, diaPedido?:
     const colunas = { id: schema.agendamento.id, inicio: schema.agendamento.inicio, fim: schema.agendamento.fim,
       status: schema.agendamento.status, clienteNome: schema.agendamento.clienteNome,
       clienteTelefone: schema.agendamento.clienteTelefone, lembreteEm: schema.agendamento.lembreteEm,
-      servicoNome: schema.servico.nome, precoCentavos: schema.servico.precoCentavos };
+      servicoNome: schema.servico.nome, precoCentavos: schema.servico.precoCentavos,
+      profissionalId: schema.agendamento.profissionalId, profissionalNome: schema.profissional.nome };
     const serializar = (a: { id: string; inicio: Date; fim: Date; status: StatusAgendamento; clienteNome: string;
-      clienteTelefone: string; lembreteEm: Date | null; servicoNome: string; precoCentavos: number }) =>
+      clienteTelefone: string; lembreteEm: Date | null; servicoNome: string; precoCentavos: number; profissionalId: string; profissionalNome: string }) =>
       ({ ...a, inicio: a.inicio.toISOString(), fim: a.fim.toISOString(), lembreteEm: a.lembreteEm?.toISOString() ?? null });
-
-    const doDia = await tx.select(colunas).from(schema.agendamento)
+    const agendamentosEntre = (desde: Date, ate: Date, soConfirmados = false) => tx.select(colunas).from(schema.agendamento)
       .innerJoin(schema.servico, eq(schema.servico.id, schema.agendamento.servicoId))
-      .where(and(eq(schema.agendamento.negocioId, negocio.id),
-        gte(schema.agendamento.inicio, instante(dia)), lt(schema.agendamento.inicio, instante(dia.add({ days: 1 })))))
-      .orderBy(asc(schema.agendamento.inicio));
+      .innerJoin(schema.profissional, eq(schema.profissional.id, schema.agendamento.profissionalId))
+      .where(and(eq(schema.agendamento.negocioId, negocio.id), gte(schema.agendamento.inicio, desde), lt(schema.agendamento.inicio, ate),
+        soConfirmados ? eq(schema.agendamento.status, 'confirmado') : undefined))
+      .orderBy(asc(schema.agendamento.inicio), asc(schema.profissional.criadoEm));
 
-    const bloqueios = await tx.select({ id: schema.bloqueio.id, inicio: schema.bloqueio.inicio, fim: schema.bloqueio.fim, motivo: schema.bloqueio.motivo })
-      .from(schema.bloqueio).where(and(eq(schema.bloqueio.negocioId, negocio.id),
+    const doDia = await agendamentosEntre(instante(dia), instante(dia.add({ days: 1 })));
+
+    // Bloqueio sem profissional vale para todos; `profissionalNome` nulo indica isso.
+    const bloqueios = await tx.select({ id: schema.bloqueio.id, inicio: schema.bloqueio.inicio, fim: schema.bloqueio.fim,
+      motivo: schema.bloqueio.motivo, profissionalId: schema.bloqueio.profissionalId, profissionalNome: schema.profissional.nome })
+      .from(schema.bloqueio).leftJoin(schema.profissional, eq(schema.profissional.id, schema.bloqueio.profissionalId))
+      .where(and(eq(schema.bloqueio.negocioId, negocio.id),
         lt(schema.bloqueio.inicio, instante(dia.add({ days: 1 }))), gt(schema.bloqueio.fim, instante(dia))))
       .orderBy(asc(schema.bloqueio.inicio));
 
     // Lembretes: o próximo dia, depois de hoje, que tenha clientes confirmados.
-    const proximos = await tx.select(colunas).from(schema.agendamento)
-      .innerJoin(schema.servico, eq(schema.servico.id, schema.agendamento.servicoId))
-      .where(and(eq(schema.agendamento.negocioId, negocio.id), eq(schema.agendamento.status, 'confirmado'),
-        gte(schema.agendamento.inicio, instante(hoje.add({ days: 1 }))),
-        lt(schema.agendamento.inicio, instante(hoje.add({ days: 1 + BUSCA_LEMBRETES_DIAS })))))
-      .orderBy(asc(schema.agendamento.inicio));
+    const proximos = await agendamentosEntre(instante(hoje.add({ days: 1 })), instante(hoje.add({ days: 1 + BUSCA_LEMBRETES_DIAS })), true);
     const diaLembretes = proximos.length ? dataLocal(proximos[0].inicio) : null;
     const lembretes = proximos.filter((a) => diaLembretes && dataLocal(a.inicio).equals(diaLembretes));
 
-    // Horários livres do dia, por serviço, para agendar quem ligou ou veio ao balcão.
+    // Horários livres do dia, por serviço e por profissional, para agendar quem ligou ou veio ao balcão.
     const servicos = await tx.select({ id: schema.servico.id, nome: schema.servico.nome,
       duracaoMin: schema.servico.duracaoMin, precoCentavos: schema.servico.precoCentavos,
     }).from(schema.servico).where(and(eq(schema.servico.negocioId, negocio.id), eq(schema.servico.ativo, true)))
       .orderBy(asc(schema.servico.precoCentavos), asc(schema.servico.id));
     const distancia = hoje.until(dia).days;
-    let livres: Record<string, { inicio: string; fim: string }[]> = {};
-    if (distancia >= 0 && distancia < DIAS_OFERECIDOS && servicos.length) {
-      const desde = instante(dia.subtract({ days: 1 }));
-      const ate = instante(dia.add({ days: 2 }));
-      const funcionamento = await tx.select({ diaSemana: schema.horarioFuncionamento.diaSemana,
-        abre: schema.horarioFuncionamento.abre, fecha: schema.horarioFuncionamento.fecha,
-        terminaDiaSeguinte: schema.horarioFuncionamento.terminaDiaSeguinte,
-      }).from(schema.horarioFuncionamento).where(eq(schema.horarioFuncionamento.negocioId, negocio.id));
-      const converter = (f: { inicio: Date; fim: Date }) => ({ inicio: f.inicio.toISOString(), fim: f.fim.toISOString() });
-      const bloqueiosVizinhos = (await tx.select({ inicio: schema.bloqueio.inicio, fim: schema.bloqueio.fim }).from(schema.bloqueio)
-        .where(and(eq(schema.bloqueio.negocioId, negocio.id), lt(schema.bloqueio.inicio, ate), gt(schema.bloqueio.fim, desde)))).map(converter);
-      const ocupados = (await tx.select({ inicio: schema.agendamento.inicio, fim: schema.agendamento.fim }).from(schema.agendamento)
-        .where(and(eq(schema.agendamento.negocioId, negocio.id), ne(schema.agendamento.status, 'cancelado'),
-          lt(schema.agendamento.inicio, ate), gt(schema.agendamento.fim, desde)))).map(converter);
-      livres = Object.fromEntries(servicos.map((s) => [s.id, calcularHorariosLivres({ fuso: negocio.fuso,
-        dataInicialLocal: dia.toString(), quantidadeDias: 1, duracaoServicoMin: s.duracaoMin, passoMin: PASSO_GRADE_MIN,
-        funcionamento, bloqueios: bloqueiosVizinhos, agendamentosOcupados: ocupados, agoraUTC: agora.toISOString() })]));
-    }
+    const podeAgendar = distancia >= 0 && distancia < DIAS_OFERECIDOS;
+    const ocupacao = await lerOcupacao(tx, negocio.id, instante(dia.subtract({ days: 1 })), instante(dia.add({ days: 2 })));
+    const livres = (duracaoMin: number): HorarioLivre[] => (podeAgendar
+      ? horariosLivresPorProfissional(ocupacao, { fuso: negocio.fuso, dataInicialLocal: dia.toString(), quantidadeDias: 1, duracaoMin, agora })
+      : []);
 
     const contar = (status: StatusAgendamento) => doDia.filter((a) => a.status === status).length;
     const somar = (status: StatusAgendamento[]) => doDia.filter((a) => status.includes(a.status)).reduce((total, a) => total + a.precoCentavos, 0);
@@ -102,11 +91,13 @@ export async function obterAgendaDoDia(db: Banco, negocioId: string, diaPedido?:
       negocio, agora: agora.toISOString(),
       hoje: hoje.toString(), dia: dia.toString(),
       diaAnterior: dia.subtract({ days: 1 }).toString(), diaSeguinte: dia.add({ days: 1 }).toString(),
+      /** Profissionais ativos. Com um só, a tela esconde filtros e escolhas. */
+      profissionais: ocupacao.profissionais,
       agendamentos: doDia.map(serializar),
       bloqueios: bloqueios.map((b) => ({ ...b, inicio: b.inicio.toISOString(), fim: b.fim.toISOString() })),
       lembretes: { dia: diaLembretes?.toString() ?? null, agendamentos: lembretes.map(serializar) },
-      servicos: servicos.map((s) => ({ ...s, horarios: livres[s.id] ?? [] })),
-      podeAgendar: distancia >= 0 && distancia < DIAS_OFERECIDOS,
+      servicos: servicos.map((s) => ({ ...s, horarios: livres(s.duracaoMin) })),
+      podeAgendar,
       resumo: { confirmados: contar('confirmado'), atendidos: contar('atendido'), faltas: contar('faltou'), cancelados: contar('cancelado'),
         previstoCentavos: somar(['confirmado', 'atendido']), realizadoCentavos: somar(['atendido']) },
     };

@@ -29,12 +29,14 @@ export type PedidoReserva = Readonly<{
   inicio: string;
   nome: string;
   telefone: string;
+  /** Profissional escolhido. Ausente ou vazio: sem preferência. */
+  profissionalId?: string;
   /** Campo-isca: pessoas não veem; robôs preenchem. Deve chegar vazio. */
   site?: string;
 }>;
 
 export type MotivoRecusa =
-  | 'dados_invalidos' | 'negocio_inexistente' | 'servico_indisponivel'
+  | 'dados_invalidos' | 'negocio_inexistente' | 'servico_indisponivel' | 'profissional_indisponivel'
   | 'horario_indisponivel' | 'limite_reservas';
 
 export type ReservaConfirmada = Readonly<{
@@ -45,6 +47,10 @@ export type ReservaConfirmada = Readonly<{
   fim: string;
   cliente: { nome: string };
   servico: { nome: string; duracaoMin: number; precoCentavos: number };
+  /** Quem vai atender: o escolhido pelo cliente ou o que o sistema definiu. */
+  profissional: { id: string; nome: string };
+  /** Com um só profissional, a tela não precisa dizer com quem é. */
+  variosProfissionais: boolean;
   negocio: { nome: string; telefone: string; fuso: string; demonstracao: boolean };
 }>;
 export type ReservaRecusada = Readonly<{ ok: false; motivo: MotivoRecusa; mensagem: string }>;
@@ -54,6 +60,7 @@ export const mensagensRecusa: Record<MotivoRecusa, string> = {
   dados_invalidos: 'Confira seu nome e o número de WhatsApp com DDD.',
   negocio_inexistente: 'Não encontramos esta agenda.',
   servico_indisponivel: 'Este serviço não está mais disponível. Atualize a página.',
+  profissional_indisponivel: 'Este profissional não está mais atendendo por aqui. Atualize a página.',
   horario_indisponivel: 'Esse horário acabou de ser ocupado. Escolha outro.',
   limite_reservas: `Este WhatsApp já tem ${LIMITE_RESERVAS_POR_TELEFONE} horários marcados aqui. Cancele um deles para marcar outro.`,
 };
@@ -89,18 +96,21 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const INSTANTE_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?Z$/;
 
-export type PedidoValido = { slug: string; servicoId: string; inicio: Date; nome: string; telefone: string };
+export type PedidoValido = { slug: string; servicoId: string; inicio: Date; nome: string; telefone: string; profissionalId?: string };
 
 /**
  * Confere o formato de cada campo. `servicoIdLivre` existe para a
- * demonstração estática, cujos serviços não têm UUID. `telefoneOpcional`
- * vale para o dono, que agenda quem veio ao balcão sem deixar telefone.
+ * demonstração estática, cujos serviços e profissionais não têm UUID.
+ * `telefoneOpcional` vale para o dono, que agenda quem veio ao balcão sem
+ * deixar telefone. Profissional ausente ou vazio significa "sem preferência".
  */
 export function validarPedido(pedido: PedidoReserva, { servicoIdLivre = false, telefoneOpcional = false } = {}): PedidoValido | null {
   if (!pedido || typeof pedido !== 'object') return null;
-  const { slug, servicoId, inicio, nome, telefone, site } = pedido;
+  const { slug, servicoId, inicio, nome, telefone, site, profissionalId } = pedido;
   if ([slug, servicoId, inicio, nome, telefone].some((campo) => typeof campo !== 'string')) return null;
   if (site) return null;
+  if (profissionalId !== undefined && typeof profissionalId !== 'string') return null;
+  if (profissionalId && (servicoIdLivre ? profissionalId.length > 80 : !UUID.test(profissionalId))) return null;
   if (!SLUG.test(slug) || slug.length > 120) return null;
   if (servicoIdLivre ? !servicoId || servicoId.length > 80 : !UUID.test(servicoId)) return null;
   if (!INSTANTE_UTC.test(inicio)) return null;
@@ -110,5 +120,5 @@ export function validarPedido(pedido: PedidoReserva, { servicoIdLivre = false, t
   if (nomeLimpo.length < 2 || nomeLimpo.length > 80 || !/\p{L}/u.test(nomeLimpo)) return null;
   const telefoneLimpo = telefoneOpcional && !telefone.trim() ? '' : normalizarTelefone(telefone);
   if (telefoneLimpo === null) return null;
-  return { slug, servicoId, inicio: instante, nome: nomeLimpo, telefone: telefoneLimpo };
+  return { slug, servicoId, inicio: instante, nome: nomeLimpo, telefone: telefoneLimpo, ...(profissionalId ? { profissionalId } : {}) };
 }

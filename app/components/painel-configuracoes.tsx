@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import type { Configuracao, DadosServico, DiaAberto } from '../../src/painel/configuracao.js';
+import type { Configuracao, DadosProfissional, DadosServico, DiaAberto } from '../../src/painel/configuracao.js';
 import type { ResultadoPainel } from '../../src/painel/acoes.js';
 import { formatarTelefone, normalizarTelefone } from '../../src/agenda/pedido-reserva.js';
 import { CabecalhoPainel, type LinksPainel } from './painel-cabecalho';
@@ -9,6 +9,8 @@ export type AcoesConfiguracao = {
   salvarNegocio: (dados: { nome: string; telefone: string }) => Promise<ResultadoPainel>;
   salvarServico: (dados: DadosServico) => Promise<ResultadoPainel>;
   definirServicoAtivo: (servicoId: string, ativo: boolean) => Promise<ResultadoPainel>;
+  salvarProfissional: (dados: DadosProfissional) => Promise<ResultadoPainel>;
+  definirProfissionalAtivo: (profissionalId: string, ativo: boolean) => Promise<ResultadoPainel>;
   salvarFuncionamento: (dias: DiaAberto[]) => Promise<ResultadoPainel>;
 };
 type Aviso = { tipo: 'erro' | 'ok'; texto: string } | null;
@@ -48,10 +50,13 @@ export function PainelConfiguracoes({ dados, email, acoes, aoSair, links }: {
     <main className="config-layout">
       <div className="config-topo">
         <p className="sobretitulo">CONFIGURAÇÕES</p>
-        <h1>O que você oferece e quando atende.</h1>
+        <h1>O que você oferece, quem atende e quando.</h1>
         {aviso && <p className={aviso.tipo === 'erro' ? 'erro' : 'sucesso'} role="status">{aviso.texto}</p>}
       </div>
-      <Servicos dados={dados} ocupado={ocupado} executar={executar} acoes={acoes} aoAvisar={setAviso} />
+      <div className="config-coluna">
+        <Servicos dados={dados} ocupado={ocupado} executar={executar} acoes={acoes} aoAvisar={setAviso} />
+        <Profissionais dados={dados} ocupado={ocupado} executar={executar} acoes={acoes} aoAvisar={setAviso} />
+      </div>
       <div className="config-coluna">
         <Funcionamento key={JSON.stringify(dados.funcionamento)} dados={dados} ocupado={ocupado}
           aoSalvar={(dias) => executar(() => acoes.salvarFuncionamento(dias), 'Horário de funcionamento salvo.')} />
@@ -59,7 +64,7 @@ export function PainelConfiguracoes({ dados, email, acoes, aoSair, links }: {
           aoSalvar={(n) => executar(() => acoes.salvarNegocio(n), 'Dados do negócio salvos.')} />
       </div>
     </main>
-    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.6.0</span></footer>
+    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.7.0</span></footer>
   </div>;
 }
 
@@ -110,6 +115,47 @@ function FormularioServico({ inicial, rotulo, ocupado, aoSalvar, aoCancelar }: {
       <label className="campo"><span>Duração (min)</span><input type="number" inputMode="numeric" min={5} max={480} step={5} value={campos.duracao} onChange={mudar('duracao')} required /></label>
       <label className="campo"><span>Preço (R$)</span><input inputMode="decimal" value={campos.preco} onChange={mudar('preco')} placeholder="40,00" required /></label>
     </div>
+    <div className="dupla">
+      <button className="botao" type="submit" disabled={ocupado}>{rotulo}</button>
+      {aoCancelar && <button className="botao secundario" type="button" onClick={aoCancelar}>Cancelar</button>}
+    </div>
+  </form>;
+}
+
+function Profissionais({ dados, ocupado, executar, acoes, aoAvisar }: {
+  dados: Configuracao; ocupado: boolean; executar: Executar; acoes: AcoesConfiguracao; aoAvisar: (aviso: Aviso) => void;
+}) {
+  const [editando, setEditando] = useState<string | null>(null);
+  const [versaoNovo, setVersaoNovo] = useState(0);
+  const atendendo = dados.profissionais.filter((p) => p.ativo).length;
+  return <section className="cartao" aria-labelledby="profissionais-titulo">
+    <h2 id="profissionais-titulo">Profissionais</h2>
+    <p className="consulta">Quem atende. Com mais de um, o cliente escolhe com quem quer marcar e cada um tem a própria agenda. Todos fazem todos os serviços, no horário de funcionamento do negócio. Para a folga de um deles, use o bloqueio na agenda.</p>
+    <ul className="lista-servicos">{dados.profissionais.map((p) => <li key={p.id} className={p.ativo ? '' : 'inativo'}>
+      {editando === p.id
+        ? <FormularioProfissional inicial={p.nome} rotulo="Salvar" ocupado={ocupado} aoCancelar={() => setEditando(null)}
+            aoSalvar={(nome) => executar(() => acoes.salvarProfissional({ id: p.id, nome }), 'Nome alterado.', () => setEditando(null))} />
+        : <>
+          <div className="servico-linha"><strong>{p.nome}</strong><span>{p.ativo ? 'Atendendo' : 'Desativado'}</span></div>
+          <div className="item-acoes">
+            <button type="button" disabled={ocupado} onClick={() => { aoAvisar(null); setEditando(p.id); }}>Renomear</button>
+            {/* O último que atende não pode sair: a página ficaria sem horários. */}
+            {(!p.ativo || atendendo > 1) && <button type="button" disabled={ocupado} onClick={() => executar(() => acoes.definirProfissionalAtivo(p.id, !p.ativo), p.ativo ? `${p.nome} saiu da página de agendamento.` : `${p.nome} voltou a atender.`)}>{p.ativo ? 'Desativar' : 'Ativar'}</button>}
+          </div>
+        </>}
+    </li>)}</ul>
+    <h3 className="subtitulo">Novo profissional</h3>
+    <FormularioProfissional key={versaoNovo} inicial="" rotulo="Adicionar profissional" ocupado={ocupado}
+      aoSalvar={(nome) => executar(() => acoes.salvarProfissional({ nome }), 'Profissional adicionado. Ele já aparece na página de agendamento.', () => setVersaoNovo((v) => v + 1))} />
+  </section>;
+}
+
+function FormularioProfissional({ inicial, rotulo, ocupado, aoSalvar, aoCancelar }: {
+  inicial: string; rotulo: string; ocupado: boolean; aoSalvar: (nome: string) => void; aoCancelar?: () => void;
+}) {
+  const [nome, setNome] = useState(inicial);
+  return <form className="formulario" onSubmit={(e) => { e.preventDefault(); aoSalvar(nome); }}>
+    <label className="campo"><span>Nome do profissional</span><input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={60} placeholder="Como o cliente conhece" required /></label>
     <div className="dupla">
       <button className="botao" type="submit" disabled={ocupado}>{rotulo}</button>
       {aoCancelar && <button className="botao secundario" type="button" onClick={aoCancelar}>Cancelar</button>}

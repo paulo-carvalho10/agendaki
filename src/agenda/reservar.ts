@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Temporal } from '@js-temporal/polyfill';
-import { and, asc, eq, gt, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema.js';
-import { calcularHorariosLivres } from './horarios-livres.js';
+import { escolherProfissional, horariosLivresPorProfissional } from './disponibilidade.js';
+import { lerOcupacao } from './ocupacao.js';
 import {
-  LIMITE_RESERVAS_POR_TELEFONE, PASSO_GRADE_MIN, recusar, validarPedido,
+  LIMITE_RESERVAS_POR_TELEFONE, recusar, validarPedido,
   type PedidoReserva, type ResultadoReserva,
 } from './pedido-reserva.js';
 
@@ -27,10 +28,15 @@ export function codigoPostgres(erro: unknown): string | undefined {
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 /**
- * Grava uma reserva. O horário é recalculado dentro da transação com o mesmo
- * motor da página pública, e a exclusão e o trigger do PostgreSQL decidem
- * quando dois pedidos disputam o mesmo intervalo. Com `peloDono`, vale para
- * o painel: sem limite por telefone e com telefone opcional.
+ * Grava uma reserva. A linha do negócio é travada logo no início, então as
+ * reservas de um mesmo negócio entram uma por vez: quem atende e quem está
+ * livre são lidos já na ordem certa. O horário é recalculado com o mesmo motor
+ * da página pública, e a exclusão e o trigger do PostgreSQL continuam valendo
+ * para qualquer gravação que não passe por aqui.
+ *
+ * Sem `profissionalId`, o cliente não tem preferência: a reserva vai para
+ * quem estiver livre e com menos atendimentos no dia. Com `peloDono`, vale
+ * para o painel: sem limite por telefone e com telefone opcional.
  */
 export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = new Date(), { peloDono = false } = {}): Promise<ResultadoReserva> {
   const valido = validarPedido(pedido, { telefoneOpcional: peloDono });
@@ -41,7 +47,7 @@ export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = 
       return await db.transaction(async (tx) => {
         const [negocio] = await tx.select({ id: schema.negocio.id, nome: schema.negocio.nome,
           telefone: schema.negocio.telefone, fuso: schema.negocio.fuso, demonstracao: schema.negocio.demonstracao,
-        }).from(schema.negocio).where(eq(schema.negocio.slug, valido.slug)).limit(1);
+        }).from(schema.negocio).where(eq(schema.negocio.slug, valido.slug)).limit(1).for('update');
         if (!negocio) return recusar('negocio_inexistente');
 
         const [servico] = await tx.select({ id: schema.servico.id, nome: schema.servico.nome,
@@ -58,24 +64,17 @@ export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = 
         if (distancia < 0 || distancia >= DIAS_OFERECIDOS) return recusar('horario_indisponivel');
 
         // Mesmas margens da página pública: expediente de ontem e fim do dia.
-        const desde = new Date(diaLocal.subtract({ days: 1 }).toZonedDateTime(negocio.fuso).epochMilliseconds);
-        const ate = new Date(diaLocal.add({ days: 2 }).toZonedDateTime(negocio.fuso).epochMilliseconds);
-        const funcionamento = await tx.select({ diaSemana: schema.horarioFuncionamento.diaSemana,
-          abre: schema.horarioFuncionamento.abre, fecha: schema.horarioFuncionamento.fecha,
-          terminaDiaSeguinte: schema.horarioFuncionamento.terminaDiaSeguinte,
-        }).from(schema.horarioFuncionamento).where(eq(schema.horarioFuncionamento.negocioId, negocio.id))
-          .orderBy(asc(schema.horarioFuncionamento.diaSemana), asc(schema.horarioFuncionamento.abre));
-        const bloqueios = await tx.select({ inicio: schema.bloqueio.inicio, fim: schema.bloqueio.fim })
-          .from(schema.bloqueio).where(and(eq(schema.bloqueio.negocioId, negocio.id), lt(schema.bloqueio.inicio, ate), gt(schema.bloqueio.fim, desde)));
-        const ocupados = await tx.select({ inicio: schema.agendamento.inicio, fim: schema.agendamento.fim })
-          .from(schema.agendamento).where(and(eq(schema.agendamento.negocioId, negocio.id), ne(schema.agendamento.status, 'cancelado'),
-            lt(schema.agendamento.inicio, ate), gt(schema.agendamento.fim, desde)));
-        const converter = (f: { inicio: Date; fim: Date }) => ({ inicio: f.inicio.toISOString(), fim: f.fim.toISOString() });
-        const livres = calcularHorariosLivres({ fuso: negocio.fuso, dataInicialLocal: diaLocal.toString(), quantidadeDias: 1,
-          duracaoServicoMin: servico.duracaoMin, passoMin: PASSO_GRADE_MIN, funcionamento,
-          bloqueios: bloqueios.map(converter), agendamentosOcupados: ocupados.map(converter), agoraUTC: agora.toISOString(),
-        });
-        if (!livres.some((h) => new Date(h.inicio).getTime() === inicio.getTime())) return recusar('horario_indisponivel');
+        const instante = (data: Temporal.PlainDate) => new Date(data.toZonedDateTime(negocio.fuso).epochMilliseconds);
+        const ocupacao = await lerOcupacao(tx, negocio.id, instante(diaLocal.subtract({ days: 1 })), instante(diaLocal.add({ days: 2 })));
+        // O profissional pedido precisa estar ativo neste negócio.
+        if (valido.profissionalId && !ocupacao.profissionais.some((p) => p.id === valido.profissionalId)) return recusar('profissional_indisponivel');
+
+        const horario = horariosLivresPorProfissional(ocupacao, { fuso: negocio.fuso, dataInicialLocal: diaLocal.toString(), quantidadeDias: 1,
+          duracaoMin: servico.duracaoMin, agora, somente: valido.profissionalId ? [valido.profissionalId] : undefined,
+        }).find((h) => new Date(h.inicio).getTime() === inicio.getTime());
+        const profissionalId = horario && (valido.profissionalId
+          ?? escolherProfissional(ocupacao, horario.profissionais, instante(diaLocal), instante(diaLocal.add({ days: 1 }))));
+        if (!profissionalId) return recusar('horario_indisponivel');
 
         // O limite protege a página pública; o dono agenda quantos quiser.
         if (!peloDono) {
@@ -86,20 +85,24 @@ export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = 
         }
 
         const tokenCancelamento = randomBytes(32).toString('base64url');
-        await tx.insert(schema.agendamento).values({ negocioId: negocio.id, servicoId: servico.id,
+        await tx.insert(schema.agendamento).values({ negocioId: negocio.id, servicoId: servico.id, profissionalId,
           clienteNome: valido.nome, clienteTelefone: valido.telefone, inicio, fim,
           tokenCancelamentoHash: hashToken(tokenCancelamento) });
         return { ok: true as const, tokenCancelamento, inicio: inicio.toISOString(), fim: fim.toISOString(),
           cliente: { nome: valido.nome },
           servico: { nome: servico.nome, duracaoMin: servico.duracaoMin, precoCentavos: servico.precoCentavos },
+          profissional: { id: profissionalId, nome: ocupacao.profissionais.find((p) => p.id === profissionalId)!.nome },
+          variosProfissionais: ocupacao.profissionais.length > 1,
           negocio: { nome: negocio.nome, telefone: negocio.telefone, fuso: negocio.fuso, demonstracao: negocio.demonstracao } };
       });
     } catch (erro) {
       const codigo = codigoPostgres(erro);
+      const repetir = tentativa < TENTATIVAS;
       // 23P01: outro pedido ocupou o intervalo entre a conferência e a gravação.
-      if (codigo === '23P01') return recusar('horario_indisponivel');
+      // Sem preferência de profissional, vale tentar de novo: outro pode estar livre.
+      if (codigo === '23P01') { if (!valido.profissionalId && repetir) continue; return recusar('horario_indisponivel'); }
       // Falha de serialização ou deadlock: a transação inteira é repetida.
-      if ((codigo === '40001' || codigo === '40P01') && tentativa < TENTATIVAS) continue;
+      if ((codigo === '40001' || codigo === '40P01') && repetir) continue;
       throw erro;
     }
   }

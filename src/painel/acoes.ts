@@ -54,14 +54,20 @@ export async function registrarLembrete(db: Banco, negocioId: string, agendament
   }
 }
 
-export type PedidoBloqueio = Readonly<{ dia: string; das: string; ate: string; motivo: string }>;
+/** `profissionalId` ausente ou nulo bloqueia a agenda de todos. */
+export type PedidoBloqueio = Readonly<{ dia: string; das: string; ate: string; motivo: string; profissionalId?: string | null }>;
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** Fecha um intervalo da agenda (almoço, folga, compromisso). Não pode cobrir um horário já marcado. */
+/**
+ * Fecha um intervalo da agenda (almoço, folga, compromisso), de todos ou de um
+ * profissional. Não pode cobrir um horário já marcado de quem está sendo bloqueado.
+ */
 export async function criarBloqueio(db: Banco, negocioId: string, pedido: PedidoBloqueio): Promise<ResultadoPainel> {
   if (!pedido || [pedido.dia, pedido.das, pedido.ate, pedido.motivo].some((campo) => typeof campo !== 'string')) return recusa('Preencha o dia e os horários.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(pedido.dia) || !HORA.test(pedido.das) || !HORA.test(pedido.ate)) return recusa('Preencha o dia e os horários.');
   if (pedido.ate <= pedido.das) return recusa('O fim do bloqueio precisa ser depois do início.');
+  const profissionalId = pedido.profissionalId || null;
+  if (profissionalId !== null && typeof profissionalId !== 'string') return recusa('Profissional não encontrado.');
   const motivo = pedido.motivo.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Horário bloqueado';
   const [negocio] = await db.select({ fuso: schema.negocio.fuso }).from(schema.negocio).where(eq(schema.negocio.id, negocioId)).limit(1);
   if (!negocio) return recusa('Negócio não encontrado.');
@@ -72,10 +78,13 @@ export async function criarBloqueio(db: Banco, negocioId: string, pedido: Pedido
     inicio = instante(pedido.das); fim = instante(pedido.ate);
   } catch { return recusa('Esse dia ou horário não existe no calendário.'); }
   try {
-    await db.insert(schema.bloqueio).values({ negocioId, inicio, fim, motivo });
+    await db.insert(schema.bloqueio).values({ negocioId, profissionalId, inicio, fim, motivo });
     return { ok: true };
   } catch (erro) {
-    if (codigoPostgres(erro) === '23P01') return recusa('Já existe cliente marcado nesse intervalo. Cancele ou remarque o horário antes de bloquear.');
+    const codigo = codigoPostgres(erro);
+    if (codigo === '23P01') return recusa('Já existe cliente marcado nesse intervalo. Cancele ou remarque o horário antes de bloquear.');
+    // 23503: o profissional é de outro negócio; 22P02: o identificador não é um UUID.
+    if (codigo === '23503' || codigo === '22P02') return recusa('Profissional não encontrado.');
     throw erro;
   }
 }
@@ -91,7 +100,8 @@ export async function removerBloqueio(db: Banco, negocioId: string, bloqueioId: 
   }
 }
 
-export type PedidoDoDono = Readonly<{ servicoId: string; inicio: string; nome: string; telefone: string }>;
+/** `profissionalId` ausente ou vazio: qualquer profissional livre. */
+export type PedidoDoDono = Readonly<{ servicoId: string; inicio: string; nome: string; telefone: string; profissionalId?: string }>;
 
 /**
  * Agenda para quem ligou ou veio ao balcão. Passa pelas mesmas conferências
@@ -100,5 +110,6 @@ export type PedidoDoDono = Readonly<{ servicoId: string; inicio: string; nome: s
 export async function agendarPeloDono(db: Banco, negocioId: string, pedido: PedidoDoDono, agora = new Date()): Promise<ResultadoReserva> {
   const [negocio] = await db.select({ slug: schema.negocio.slug }).from(schema.negocio).where(eq(schema.negocio.id, negocioId)).limit(1);
   if (!negocio || !pedido || typeof pedido !== 'object') return recusar('negocio_inexistente');
-  return reservarHorario(db, { slug: negocio.slug, servicoId: pedido.servicoId, inicio: pedido.inicio, nome: pedido.nome, telefone: pedido.telefone }, agora, { peloDono: true });
+  return reservarHorario(db, { slug: negocio.slug, servicoId: pedido.servicoId, inicio: pedido.inicio, nome: pedido.nome, telefone: pedido.telefone,
+    profissionalId: pedido.profissionalId || undefined }, agora, { peloDono: true });
 }
