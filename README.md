@@ -2,6 +2,8 @@
 
 ## [Abrir demonstração online ↗](https://paulo-carvalho10.github.io/agendaki/)
 
+**[Ver também o painel do dono ↗](https://paulo-carvalho10.github.io/agendaki/painel/)**
+
 Explore os serviços, escolha uma data, selecione um horário e confirme com nome
 e WhatsApp. Abre no celular e no computador, sem instalar nada. A barbearia é
 fictícia: na demonstração online a reserva é simulada e nada é enviado.
@@ -9,11 +11,12 @@ fictícia: na demonstração online a reserva é simulada e nada é enviado.
 Agendamento online para pequenos negócios, com motor de disponibilidade e
 proteção contra conflitos no PostgreSQL.
 
-**Versão 0.5.0 · em desenvolvimento.** O cliente escolhe serviço, data e horário,
+**Versão 0.6.0 · em desenvolvimento.** O cliente escolhe serviço, data e horário,
 confirma com nome e WhatsApp, e recebe um link pessoal para cancelar. O dono
 entra no painel para ver a agenda do dia, marcar quem veio ou faltou, enviar
-lembretes, agendar quem ligou e bloquear horários. A edição de serviços e de
-horário de funcionamento vem na próxima etapa. A demonstração no GitHub Pages usa os
+lembretes, agendar quem ligou, bloquear horários e configurar serviços,
+expediente e dados do negócio. Falta publicar com banco de produção.
+A demonstração no GitHub Pages, com a página do cliente e o painel do dono, usa os
 mesmos componentes React e o mesmo motor de disponibilidade, com dados fictícios
 renovados a cada visita e sem servidor. A versão Next.js com PostgreSQL, que
 grava e cancela de verdade, pode ser executada localmente.
@@ -70,6 +73,10 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 - Painel em `/painel`: agenda do dia com navegação entre datas, atendido, falta
   e cancelamento, agendamento manual, bloqueios e lembretes do próximo dia com
   a mensagem pronta para o WhatsApp.
+- Configurações em `/painel/configuracoes`: criar, editar e desativar serviços,
+  definir o expediente da semana e alterar nome e WhatsApp do negócio.
+- Cadastro de um negócio novo pela linha de comando (`pnpm negocio:criar`).
+- Demonstração estática do painel, com as mesmas telas e regras, em memória.
 
 ## Rodar os testes
 
@@ -142,6 +149,16 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `app/painel/` | Página do painel, Server Actions e conferência da sessão |
 | `app/components/painel-agenda.tsx` | Interface do painel, sem dependência do Next.js |
 | `tests/painel.test.ts` | Login, sessão, agenda, ações e isolamento entre negócios |
+| `src/painel/configuracao.ts` | Leitura e gravação de serviços, expediente e dados do negócio |
+| `app/painel/configuracoes/page.tsx` | Página de configurações |
+| `app/components/painel-configuracoes.tsx` | Interface das configurações |
+| `app/components/painel-cabecalho.tsx` | Topo e abas comuns às telas do painel |
+| `src/db/negocios.ts` | Cadastro de um negócio com o acesso do dono |
+| `scripts/criar-negocio.ts` | Linha de comando do cadastro |
+| `tests/configuracao.test.ts` | Cadastro, serviços, expediente e isolamento entre negócios |
+| `src/painel/demo.ts` | O painel em memória, para a demonstração sem servidor |
+| `demo/painel.tsx` | Entrada da demonstração estática do painel |
+| `tests/painel-demo.test.ts` | Regras da demonstração do painel |
 | `scripts/preview-demo.ts` | Demonstração local com banco temporário |
 
 ## Decisões e limites
@@ -287,11 +304,40 @@ com telefone opcional.
 **Bloqueios.** Fecham um intervalo no fuso do negócio. O banco recusa um
 bloqueio que cubra um horário já marcado.
 
+**Serviços.** O dono cria, edita e desativa. Não há exclusão: desativar tira o
+serviço da página pública e preserva o histórico. A duração vai de 5 minutos a
+8 horas, de 5 em 5. Mudar a duração não altera horários já marcados.
+
+**Expediente.** A tela edita uma faixa por dia, sem virar a noite, e troca o
+expediente inteiro numa transação. Expedientes com mais de um turno ou que
+passam da meia-noite continuam aceitos pelo motor, mas são configurados fora da
+tela, que os mostra só para leitura e não os sobrescreve. Horários já marcados
+fora do novo expediente continuam valendo.
+
+**Dados do negócio.** Nome e WhatsApp. O endereço da página (`slug`) não muda
+pelo painel, para não quebrar links já divulgados. No negócio de demonstração
+nome e WhatsApp ficam fixos.
+
+## Cadastrar um negócio
+
+```sh
+pnpm negocio:criar --nome "Barbearia do Zé" --telefone "(34) 99999-0000" --email dono@exemplo.com
+```
+
+Cria o negócio e o acesso do dono, com expediente de segunda a sexta, das 9h às
+18h, e sem serviços. O endereço da página sai do nome (`barbearia-do-ze`), ou de
+`--slug`. Sem `--senha`, uma senha é gerada e mostrada uma única vez: o banco
+guarda só o hash. Endereços usados pelo sistema (`painel`, `entrar`, `cancelar`
+e outros) são recusados. Depois disso, o dono entra em `/entrar` e completa
+serviços e horários em Configurações. Opcionais: `--slug`, `--senha`, `--fuso`.
+
 ## Validação desta etapa
 
-94 testes: 43 do motor, 2 dos dados de demonstração, 6 da validação do
-pedido e 43 de integração com PostgreSQL real (17 das garantias do banco e da
-página pública, 12 de reserva e cancelamento, 14 do login e do painel).
+109 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
+pedido e da exibição de preço, 4 do painel de demonstração e 53 de integração
+com PostgreSQL real (17 das garantias do banco e da página pública, 12 de
+reserva e cancelamento, 14 do login e do painel, 10 do cadastro e das
+configurações).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -324,8 +370,9 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
 2. ~~Cancelamento pelo cliente.~~ Feito na 0.4.0.
 3. ~~Login e painel do dono: agenda do dia, atendido ou falta, bloqueios,
    agendamento manual e lembretes com mensagem pronta.~~ Feito na 0.5.0.
-4. Edição de serviços, horário de funcionamento e dados do negócio pelo painel;
-   cadastro de um negócio novo; demonstração pública do painel.
+4. ~~Edição de serviços, horário de funcionamento e dados do negócio pelo
+   painel; cadastro de um negócio novo; demonstração pública do painel.~~
+   Feito na 0.6.0.
 5. Publicação com banco de produção, após definir a hospedagem.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
@@ -341,5 +388,7 @@ pnpm build:pages
 Versione os arquivos gerados de `docs/` junto com a alteração. A entrada
 `demo/main.tsx` reutiliza `AgendaPublica`; `src/agenda/dados-demo.ts`
 gera uma janela móvel de 14 dias com o motor real, sem consultar um banco.
+A entrada `demo/painel.tsx` reutiliza `PainelAgenda` e publica o painel do dono
+em `/agendaki/painel/`, com o estado guardado na memória da página.
 Os caminhos dos assets funcionam no prefixo `/agendaki/`, incluindo
 `/agendaki/barbearia-demo/`. Nenhuma credencial ou dado pessoal é publicado.

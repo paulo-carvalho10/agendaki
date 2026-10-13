@@ -23,5 +23,5 @@ async function reservarNaDemo(pedido: PedidoReserva): Promise<ResultadoReserva> 
 }
 
 createRoot(document.getElementById('root')!).render(
-  <AgendaPublica dados={dados} homeHref="/agendaki/" aoReservar={reservarNaDemo} rotaCancelamento={null} />,
+  <AgendaPublica dados={dados} homeHref="/agendaki/" aoReservar={reservarNaDemo} rotaCancelamento={null} hrefPainelDemo="/agendaki/painel/" />,
 );
