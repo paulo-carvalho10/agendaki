@@ -1,0 +1,14 @@
+# O que não sobe para a Vercel. Com este arquivo presente, o .gitignore não é consultado.
+.git
+node_modules
+.next
+.next-dev
+.test-postgres*
+.sites-runtime
+coverage
+*.log
+*.tsbuildinfo
+# Segredos locais, inclusive .env.producao
+.env*
+# Demonstração estática do GitHub Pages: a Vercel serve a aplicação de verdade
+docs
