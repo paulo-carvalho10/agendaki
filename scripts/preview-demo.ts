@@ -44,7 +44,9 @@ try {
     await seedDemo(db, randomBytes(24).toString('hex'));
   } finally { await client.end(); }
   console.log('Barbearia de demonstração pronta. Banco temporário; nenhuma conexão com Neon.');
-  child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', '3100'], {
+  // PORT permite rodar ao lado de outro projeto que já use a 3100.
+  const porta = /^\d{2,5}$/.test(process.env.PORT ?? '') ? process.env.PORT! : '3100';
+  child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', porta], {
     stdio: 'inherit', windowsHide: true,
     env: { ...process.env, DATABASE_URL: url, NEXT_TELEMETRY_DISABLED: '1' },
   });
