@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import EmbeddedPostgres from 'embedded-postgres';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { conectar } from '../src/db/client.js';
-import { seedDemo } from '../src/db/seed.js';
+import { seedDemo, DEMO_EMAIL } from '../src/db/seed.js';
 import { limparBancoTemporario } from './limpar-banco-temporario.js';
 
 const probe = createServer();
@@ -23,6 +23,8 @@ const cluster = new EmbeddedPostgres({
   initdbFlags: ['--encoding=UTF8'], postgresFlags: ['-h', '127.0.0.1'],
   onLog: () => {}, onError: () => {},
 });
+// Senha só desta execução, para entrar no painel da demonstração local.
+const senhaDemo = process.env.DEMO_OWNER_PASSWORD ?? `demo-${randomBytes(6).toString('hex')}`;
 let child: ReturnType<typeof spawn> | undefined;
 let encerrando = false;
 async function encerrar() {
@@ -41,11 +43,13 @@ try {
   const { db, client } = conectar(url);
   try {
     await migrate(db, { migrationsFolder: './drizzle' });
-    await seedDemo(db, randomBytes(24).toString('hex'));
+    await seedDemo(db, senhaDemo);
   } finally { await client.end(); }
-  console.log('Barbearia de demonstração pronta. Banco temporário; nenhuma conexão com Neon.');
   // PORT permite rodar ao lado de outro projeto que já use a 3100.
   const porta = /^\d{2,5}$/.test(process.env.PORT ?? '') ? process.env.PORT! : '3100';
+  console.log('Barbearia de demonstração pronta. Banco temporário; nenhuma conexão com Neon.');
+  console.log(`Página do cliente: http://127.0.0.1:${porta}/barbearia-demo`);
+  console.log(`Painel do dono:    http://127.0.0.1:${porta}/entrar  ·  ${DEMO_EMAIL}  ·  senha: ${senhaDemo}`);
   child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', porta], {
     stdio: 'inherit', windowsHide: true,
     env: { ...process.env, DATABASE_URL: url, NEXT_TELEMETRY_DISABLED: '1' },
