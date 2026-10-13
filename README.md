@@ -2,17 +2,19 @@
 
 ## [Abrir demonstração online ↗](https://paulo-carvalho10.github.io/agendaki/)
 
-Explore os serviços, escolha uma data e selecione um horário. Abre no celular
-e no computador, sem instalar nada. A barbearia é fictícia e nenhuma reserva é gravada.
+Explore os serviços, escolha uma data, selecione um horário e confirme com nome
+e WhatsApp. Abre no celular e no computador, sem instalar nada. A barbearia é
+fictícia: na demonstração online a reserva é simulada e nada é enviado.
 
-Consulta de serviços e horários disponíveis para pequenos negócios, com motor de
-disponibilidade e proteção contra conflitos no PostgreSQL.
+Agendamento online para pequenos negócios, com motor de disponibilidade e
+proteção contra conflitos no PostgreSQL.
 
-**Versão 0.3.0 · em desenvolvimento.** A página pública permite escolher serviço,
-data e horário. A seleção ainda não grava reservas. Login, painel do dono e
-cancelamento serão implementados nas próximas etapas. A demonstração no GitHub Pages
-usa os mesmos componentes React e motor de disponibilidade com dados fictícios,
-renovados a cada visita. A versão Next.js com PostgreSQL pode ser executada localmente.
+**Versão 0.4.0 · em desenvolvimento.** O cliente escolhe serviço, data e horário,
+confirma com nome e WhatsApp, e recebe um link pessoal para cancelar. Login e
+painel do dono vêm nas próximas etapas. A demonstração no GitHub Pages usa os
+mesmos componentes React e o mesmo motor de disponibilidade, com dados fictícios
+renovados a cada visita e sem servidor. A versão Next.js com PostgreSQL, que
+grava e cancela de verdade, pode ser executada localmente.
 
 ![Página pública da Barbearia Horizonte](docs/agenda-desktop.png)
 
@@ -35,6 +37,7 @@ Abra **http://127.0.0.1:3100/barbearia-demo**. O comando inicia um PostgreSQL
 temporário, aplica as migrações e carrega a barbearia fictícia. Não precisa de
 conta Neon, Docker ou `.env`. Ao encerrar com Ctrl+C, os dados temporários são
 removidos. Não use esse comando para dados reais. Testado em Windows x64.
+Se a porta 3100 já estiver em uso, defina `PORT` (por exemplo, `PORT=3200`).
 
 Para usar seu próprio PostgreSQL, configure `.env` conforme a seção abaixo e
 execute `pnpm dev`. Para compilar: `pnpm build`; para servir a compilação: `pnpm start`.
@@ -52,6 +55,12 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 - Página pública em `/[slug]`, com seleção de serviços, calendário de 14 dias e resumo.
 - Leitura do banco no servidor, sem expor informações de clientes à página pública.
 - Estados de carregamento, erro, negócio inexistente e datas sem disponibilidade.
+- Gravação da reserva com nome e WhatsApp: o horário é recalculado dentro da
+  transação, e quem perde uma disputa recebe o aviso para escolher outro.
+- Limite de duas reservas futuras por telefone em cada negócio e campo-isca
+  contra robôs, sem captcha.
+- Tela de confirmação com a mensagem pronta para o WhatsApp do negócio.
+- Cancelamento pelo cliente em `/cancelar/[token]`: o horário volta a ficar livre.
 
 ## Rodar os testes
 
@@ -110,7 +119,13 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `scripts/demo-horarios.ts` | Exemplo reproduzível da agenda no terminal |
 | `src/agenda/pagina-publica.ts` | Consulta pública consistente, incluindo ocupações que atravessam a janela |
 | `app/[slug]/page.tsx` | Rota pública renderizada no servidor |
-| `app/components/agenda-publica.tsx` | Seleção de serviço, data e horário |
+| `app/components/agenda-publica.tsx` | Seleção de serviço, data e horário, formulário e confirmação |
+| `src/agenda/pedido-reserva.ts` | Validação do pedido e tipos, sem banco: serve ao servidor e à demo estática |
+| `src/agenda/reservar.ts` | Grava a reserva, revalidando o horário e tratando conflitos |
+| `src/agenda/cancelar.ts` | Consulta e cancelamento pelo token do cliente |
+| `app/acoes.ts` | Server Actions de reservar e cancelar |
+| `app/cancelar/[token]/page.tsx` | Página do link de cancelamento |
+| `tests/reservas.test.ts` | Reserva, disputa, limite e cancelamento no PostgreSQL real |
 | `scripts/preview-demo.ts` | Demonstração local com banco temporário |
 
 ## Decisões e limites
@@ -148,8 +163,8 @@ Entradas não são modificadas; entradas inválidas geram `RangeError`.
   que **intersectam** os expedientes consultados, incluindo as iniciadas antes
   da janela ou terminadas depois dela. Uma consulta só por data de início perde
   conflitos. O adaptador `obterPaginaPublica` já faz essa consulta por interseção.
-- O resultado não garante uma reserva: o fluxo de gravação deve recalcular e
-  manter a proteção transacional no PostgreSQL.
+- O resultado não garante uma reserva: `reservarHorario` recalcula o horário
+  dentro da transação e a proteção transacional do PostgreSQL decide as disputas.
 
 Exemplo: 9h–18h, serviço e passo de 30 minutos, almoço 12h–13h e reservas
 10h–10h30 e 15h–16h produzem 13 encaixes. `pnpm demo:horarios` mostra cada um
@@ -173,8 +188,8 @@ tabela. Os testes mantêm a primeira transação aberta e verificam no PostgreSQ
 que a segunda está aguardando o lock; após o commit, ela deve falhar.
 
 Em `REPEATABLE READ` ou `SERIALIZABLE`, a disputa pode resultar em `40001`.
-Ao implementar a API, será necessário repetir a transação completa em falhas de
-serialização/deadlock e traduzir `23P01` em conflito de horário. A suíte atual
+`reservarHorario` repete a transação completa em falhas de serialização ou
+deadlock e traduz `23P01` em "esse horário acabou de ser ocupado". A suíte
 exercita o nível padrão `READ COMMITTED`.
 
 **Integridade.** O serviço deve pertencer ao negócio da reserva, por chave
@@ -197,11 +212,35 @@ Quando a interface existir, ações de WhatsApp na demo deverão apenas exibir a
 mensagem, sem envio. O seed não faz chamadas externas nem envia mensagens.
 
 O banco guarda SHA-256 de tokens aleatórios de cancelamento com 256 bits de
-entropia. O seed imprime os links relativos para revisão; a rota ainda não existe.
+entropia. O token em si só aparece uma vez, na tela de confirmação, e a página
+`/cancelar/[token]` pede ao navegador que não o envie no cabeçalho Referer.
+O seed imprime os links relativos dos agendamentos de exemplo.
+
+## Reserva e cancelamento
+
+**Reservar.** `reservarHorario(db, pedido)` valida nome e telefone (DDD
+obrigatório, celular ou fixo), confere que o serviço está ativo e pertence ao
+negócio, recalcula os horários livres do dia com o mesmo motor da página e só
+então grava. Um horário fora da grade, no passado, além dos 14 dias ou já
+ocupado é recusado sem gravar nada. O telefone é guardado só com dígitos.
+
+**Limites.** Cada telefone pode manter duas reservas futuras por negócio.
+É uma barreira simples contra quem tenta lotar a agenda; não substitui limite
+por IP nem verificação do número, que ficam para a publicação.
+
+**Avisar o negócio.** Não há envio automático de mensagens. A tela de
+confirmação traz um botão que abre o WhatsApp do negócio com a mensagem pronta.
+No negócio de demonstração a mensagem é só exibida.
+
+**Cancelar.** O cliente cancela pelo link até o início do horário. Reservas
+já atendidas ou marcadas como falta não podem ser canceladas por ele. Para
+remarcar, cancela e escolhe outro horário.
 
 ## Validação desta etapa
 
-60 testes: 43 do motor e 17 de integração com PostgreSQL real.
+79 testes: 43 do motor, 2 dos dados de demonstração, 6 da validação do
+pedido e 28 de integração com PostgreSQL real (17 das garantias do banco e da
+página pública, 11 de reserva e cancelamento).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -218,15 +257,22 @@ entre negócios, ocupações anteriores à janela, reservas canceladas, serviço
 inativos, negócio vazio e slug inexistente. A limpeza do PostgreSQL temporário
 tem repetição limitada para lidar com arquivos que o Windows ainda está liberando.
 
+Os testes de reserva cobrem gravação, privacidade da página pública, dados
+inválidos, serviço inativo ou de outro negócio, horários que o motor não
+ofereceria, sobreposição parcial, bloqueio, cinco pedidos simultâneos para o
+mesmo horário (exatamente um vence), limite por telefone e cancelamento.
+
 O indicador de desenvolvimento do Next.js está desativado. Não há cursor
 personalizado na página. Em navegadores compatíveis, ferramentas WebMCP permitem
 consultar disponibilidade e selecionar um horário; nenhuma delas confirma reservas.
 
 ## Próximas etapas do escopo aprovado
 
-1. Gravação de reservas com revalidação da disponibilidade e tratamento de conflitos.
-2. Login e painel do dono; bloqueios e cancelamento pelo cliente.
-3. Publicação na Vercel com Neon, após configuração das contas.
+1. ~~Gravação de reservas com revalidação da disponibilidade e tratamento de conflitos.~~ Feito na 0.4.0.
+2. ~~Cancelamento pelo cliente.~~ Feito na 0.4.0.
+3. Login e painel do dono: agenda do dia, atendido ou falta, bloqueios, serviços
+   e a lista de lembretes do dia seguinte com mensagem pronta para o WhatsApp.
+4. Publicação com banco de produção, após definir a hospedagem.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
 
