@@ -9,9 +9,11 @@ fictícia: na demonstração online a reserva é simulada e nada é enviado.
 Agendamento online para pequenos negócios, com motor de disponibilidade e
 proteção contra conflitos no PostgreSQL.
 
-**Versão 0.4.0 · em desenvolvimento.** O cliente escolhe serviço, data e horário,
-confirma com nome e WhatsApp, e recebe um link pessoal para cancelar. Login e
-painel do dono vêm nas próximas etapas. A demonstração no GitHub Pages usa os
+**Versão 0.5.0 · em desenvolvimento.** O cliente escolhe serviço, data e horário,
+confirma com nome e WhatsApp, e recebe um link pessoal para cancelar. O dono
+entra no painel para ver a agenda do dia, marcar quem veio ou faltou, enviar
+lembretes, agendar quem ligou e bloquear horários. A edição de serviços e de
+horário de funcionamento vem na próxima etapa. A demonstração no GitHub Pages usa os
 mesmos componentes React e o mesmo motor de disponibilidade, com dados fictícios
 renovados a cada visita e sem servidor. A versão Next.js com PostgreSQL, que
 grava e cancela de verdade, pode ser executada localmente.
@@ -34,7 +36,9 @@ pnpm dev:demo
 ```
 
 Abra **http://127.0.0.1:3100/barbearia-demo**. O comando inicia um PostgreSQL
-temporário, aplica as migrações e carrega a barbearia fictícia. Não precisa de
+temporário, aplica as migrações e carrega a barbearia fictícia. O terminal
+mostra também o endereço do painel do dono, o email e uma senha válida só
+para aquela execução (ou a de `DEMO_OWNER_PASSWORD`, se definida). Não precisa de
 conta Neon, Docker ou `.env`. Ao encerrar com Ctrl+C, os dados temporários são
 removidos. Não use esse comando para dados reais. Testado em Windows x64.
 Se a porta 3100 já estiver em uso, defina `PORT` (por exemplo, `PORT=3200`).
@@ -61,6 +65,11 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
   contra robôs, sem captcha.
 - Tela de confirmação com a mensagem pronta para o WhatsApp do negócio.
 - Cancelamento pelo cliente em `/cancelar/[token]`, até uma hora antes: o horário volta a ficar livre.
+- Login do dono em `/entrar`, com sessão em cookie `httpOnly` e bloqueio
+  temporário depois de cinco senhas erradas.
+- Painel em `/painel`: agenda do dia com navegação entre datas, atendido, falta
+  e cancelamento, agendamento manual, bloqueios e lembretes do próximo dia com
+  a mensagem pronta para o WhatsApp.
 
 ## Rodar os testes
 
@@ -126,6 +135,13 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `app/acoes.ts` | Server Actions de reservar e cancelar |
 | `app/cancelar/[token]/page.tsx` | Página do link de cancelamento |
 | `tests/reservas.test.ts` | Reserva, disputa, limite e cancelamento no PostgreSQL real |
+| `drizzle/0002_painel_do_dono.sql` | Tabela de sessões, contagem de falhas de login e registro do lembrete |
+| `src/auth/sessao.ts` | Conferência de senha, bloqueio por tentativas e sessões |
+| `src/painel/agenda.ts` | Leitura da agenda do dia, dos lembretes e dos horários livres para o dono |
+| `src/painel/acoes.ts` | Mudança de situação, lembrete, bloqueios e agendamento manual |
+| `app/painel/` | Página do painel, Server Actions e conferência da sessão |
+| `app/components/painel-agenda.tsx` | Interface do painel, sem dependência do Next.js |
+| `tests/painel.test.ts` | Login, sessão, agenda, ações e isolamento entre negócios |
 | `scripts/preview-demo.ts` | Demonstração local com banco temporário |
 
 ## Decisões e limites
@@ -238,11 +254,44 @@ vaga. Depois disso a página explica que o prazo terminou e oferece avisar o
 negócio pelo WhatsApp. Reservas já atendidas ou marcadas como falta não podem
 ser canceladas por ele. Para remarcar, cancela e escolhe outro horário.
 
+## Painel do dono
+
+**Login sem biblioteca de autenticação.** O plano original citava Auth.js. Para
+um único tipo de acesso (email e senha do dono), sessões próprias ficaram
+menores e mais fáceis de testar: o token nasce de `randomBytes(32)`, o banco
+guarda só o SHA-256 e o navegador recebe um cookie `httpOnly`, `SameSite=Lax` e
+`Secure` em produção, válido por 30 dias. Sair apaga a sessão no banco.
+A senha é conferida com scrypt em tempo constante. Email inexistente e senha
+errada devolvem a mesma resposta. Depois de cinco erros seguidos, aquele email
+fica travado por 15 minutos.
+
+**Um negócio não enxerga o outro.** Toda consulta e toda ação do painel recebe
+o `negocioId` da sessão e filtra por ele. Um identificador de outro negócio
+recebe a mesma resposta de um identificador que não existe.
+
+**Situações.** Atendido e falta só podem ser marcados depois que o horário
+começa, e dá para desfazer. O dono cancela um horário confirmado a qualquer
+momento, sem o prazo de uma hora que vale para o cliente. Horário cancelado
+não é reativado: faz-se um novo agendamento.
+
+**Lembretes com um toque.** O painel lista os clientes confirmados do próximo
+dia que tiver clientes (até quatro dias à frente, o que cobre o domingo fechado)
+e abre o WhatsApp de cada um com a mensagem pronta. Não há envio automático.
+O horário em que o lembrete foi aberto fica registrado. No negócio de
+demonstração a mensagem é só exibida.
+
+**Agendamento manual.** Para quem ligou ou veio ao balcão. Usa a mesma função
+da página pública, com as mesmas conferências, sem o limite por telefone e
+com telefone opcional.
+
+**Bloqueios.** Fecham um intervalo no fuso do negócio. O banco recusa um
+bloqueio que cubra um horário já marcado.
+
 ## Validação desta etapa
 
-80 testes: 43 do motor, 2 dos dados de demonstração, 6 da validação do
-pedido e 29 de integração com PostgreSQL real (17 das garantias do banco e da
-página pública, 12 de reserva e cancelamento).
+94 testes: 43 do motor, 2 dos dados de demonstração, 6 da validação do
+pedido e 43 de integração com PostgreSQL real (17 das garantias do banco e da
+página pública, 12 de reserva e cancelamento, 14 do login e do painel).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -273,9 +322,11 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
 
 1. ~~Gravação de reservas com revalidação da disponibilidade e tratamento de conflitos.~~ Feito na 0.4.0.
 2. ~~Cancelamento pelo cliente.~~ Feito na 0.4.0.
-3. Login e painel do dono: agenda do dia, atendido ou falta, bloqueios, serviços
-   e a lista de lembretes do dia seguinte com mensagem pronta para o WhatsApp.
-4. Publicação com banco de produção, após definir a hospedagem.
+3. ~~Login e painel do dono: agenda do dia, atendido ou falta, bloqueios,
+   agendamento manual e lembretes com mensagem pronta.~~ Feito na 0.5.0.
+4. Edição de serviços, horário de funcionamento e dados do negócio pelo painel;
+   cadastro de um negócio novo; demonstração pública do painel.
+5. Publicação com banco de produção, após definir a hospedagem.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
 
