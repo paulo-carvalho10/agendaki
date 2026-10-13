@@ -1,3 +1,8 @@
 allowBuilds:
   '@embedded-postgres/windows-x64': true
+  # Linux (Vercel e integração contínua) e macOS: sem isto o pnpm 11 recusa a instalação.
+  '@embedded-postgres/linux-x64': true
+  '@embedded-postgres/linux-arm64': true
+  '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/darwin-x64': true
   esbuild: true
