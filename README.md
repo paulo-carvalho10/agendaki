@@ -4,6 +4,9 @@
 
 **[Ver também o painel do dono ↗](https://paulo-carvalho10.github.io/agendaki/painel/)**
 
+**[Versão com banco de verdade ↗](https://agendaki-ten.vercel.app/)** — a mesma barbearia fictícia, agora
+gravando e cancelando de fato. É renovada todo dia, e nenhuma mensagem é enviada.
+
 Explore os serviços, escolha uma data, selecione um horário e confirme com nome
 e WhatsApp. Abre no celular e no computador, sem instalar nada. A barbearia é
 fictícia: na demonstração online a reserva é simulada e nada é enviado.
@@ -373,7 +376,7 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
 4. ~~Edição de serviços, horário de funcionamento e dados do negócio pelo
    painel; cadastro de um negócio novo; demonstração pública do painel.~~
    Feito na 0.6.0.
-5. Publicação com banco de produção na Vercel com Neon (configuração pronta; veja "Publicar na Vercel").
+5. ~~Publicação com banco de produção.~~ No ar na Vercel com Neon desde a 0.6.0 (veja "Publicar na Vercel").
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
 
