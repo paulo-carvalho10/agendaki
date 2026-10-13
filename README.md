@@ -373,9 +373,41 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
 4. ~~Edição de serviços, horário de funcionamento e dados do negócio pelo
    painel; cadastro de um negócio novo; demonstração pública do painel.~~
    Feito na 0.6.0.
-5. Publicação com banco de produção, após definir a hospedagem.
+5. Publicação com banco de produção na Vercel com Neon (configuração pronta; veja "Publicar na Vercel").
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
+
+## Publicar na Vercel
+
+A versão que grava de verdade roda na Vercel com PostgreSQL do Neon. O plano
+gratuito da Vercel não permite uso comercial: serve enquanto o Agendaki é
+demonstração e deve ser trocado antes da primeira venda.
+
+1. Importe o repositório na Vercel. `vercel.json` já define o comando de build,
+   a região de São Paulo (`gru1`) e a rotina diária.
+2. Adicione o Neon pelo Marketplace da Vercel, de preferência na região de São
+   Paulo. A integração cria `DATABASE_URL` (com pool, usada pela aplicação) e
+   `DATABASE_URL_UNPOOLED` (direta, usada pelas migrações).
+3. Crie duas variáveis de ambiente de produção: `DEMO_OWNER_PASSWORD`, com pelo
+   menos 12 caracteres, e `CRON_SECRET`, um valor aleatório longo.
+4. Publique. O build roda `scripts/vercel-migrar.ts` antes do `next build`, e
+   as migrações só são aplicadas quando `VERCEL_ENV` é `production`.
+
+**Demonstração renovada todo dia.** `/api/reiniciar-demo` recria a barbearia
+fictícia: apaga os agendamentos, inclusive o que visitantes digitaram, e põe os
+de exemplo nos próximos dias. A Vercel chama esse endereço às 4h de Brasília
+com `CRON_SECRET` no cabeçalho; sem o segredo certo ele responde 401. Para
+criar a demonstração logo depois da primeira publicação:
+
+```sh
+curl -H "Authorization: Bearer $CRON_SECRET" https://SEU-ENDERECO/api/reiniciar-demo
+```
+
+**Negócios de verdade** são criados com `pnpm negocio:criar`, apontando
+`DATABASE_URL` para o banco de produção. A rotina diária não toca neles.
+
+**pnpm.** O campo `packageManager` fixa o pnpm 11, a mesma versão do
+desenvolvimento.
 
 ## Hospedagem no GitHub Pages
 

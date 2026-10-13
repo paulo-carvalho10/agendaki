@@ -6,6 +6,7 @@ node_modules/
 coverage/
 *.log
 .next/
+.vercel/
 .next-dev/
 .sites-runtime/
 next-env.d.ts
