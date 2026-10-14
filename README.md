@@ -182,6 +182,7 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `app/components/avisos-push.tsx` | Ativar, testar e desativar os avisos em cada aparelho |
 | `app/painel/atualizador.tsx` | Mantém a agenda em dia com o painel aberto |
 | `tests/senha-e-avisos.test.ts` | Senha, link, novidades, aparelhos e avisos |
+| `tests/migracao-avisos.test.ts` | Aplica a migração 0004 sobre um banco que já tem clientes marcados |
 | `src/db/negocios.ts` | Cadastro de um negócio com o acesso do dono |
 | `scripts/criar-negocio.ts` | Linha de comando do cadastro |
 | `tests/configuracao.test.ts` | Cadastro, serviços, profissionais, expediente e isolamento entre negócios |
@@ -442,12 +443,12 @@ serviços, profissionais e horários em Configurações. Opcionais: `--slug`,
 
 ## Validação desta etapa
 
-134 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
-pedido e da exibição de preço, 4 do painel de demonstração e 78 de integração
+135 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
+pedido e da exibição de preço, 4 do painel de demonstração e 79 de integração
 com PostgreSQL real (20 das garantias do banco e da página pública, 18 de
 reserva e cancelamento, 16 do login e do painel, 12 do cadastro e das
-configurações, 2 da migração para vários profissionais, 10 de senha,
-novidades e avisos).
+configurações, 2 da migração para vários profissionais, 1 da migração dos
+avisos, 10 de senha, novidades e avisos).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.

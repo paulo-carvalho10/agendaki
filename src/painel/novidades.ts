@@ -24,7 +24,7 @@ export type Novidades = { total: number; itens: Novidade[] };
  * marca ou cancela no painel não entra.
  */
 export async function obterNovidades(db: Banco, usuarioId: string): Promise<Novidades> {
-  const [usuario] = await db.select({ negocioId: schema.usuario.negocioId, vistasEm: schema.usuario.novidadesVistasEm })
+  const [usuario] = await db.select({ negocioId: schema.usuario.negocioId })
     .from(schema.usuario).where(eq(schema.usuario.id, usuarioId)).limit(1);
   if (!usuario) return { total: 0, itens: [] };
   const colunas = { agendamentoId: schema.agendamento.id, clienteNome: schema.agendamento.clienteNome, inicio: schema.agendamento.inicio,
@@ -34,8 +34,11 @@ export async function obterNovidades(db: Banco, usuarioId: string): Promise<Novi
     .innerJoin(schema.servico, eq(schema.servico.id, schema.agendamento.servicoId))
     .innerJoin(schema.profissional, eq(schema.profissional.id, schema.agendamento.profissionalId));
   const doNegocio = eq(schema.agendamento.negocioId, usuario.negocioId);
-  const marcados = and(doNegocio, eq(schema.agendamento.peloDono, false), gt(schema.agendamento.criadoEm, usuario.vistasEm));
-  const cancelados = and(doNegocio, gt(schema.agendamento.canceladoPeloClienteEm, usuario.vistasEm));
+  // A comparação fica no banco: trazido para o JavaScript, o instante perde os microssegundos,
+  // e um agendamento gravado no mesmo instante da conferida pareceria posterior a ela.
+  const vistasEm = sql`(select novidades_vistas_em from usuario where id = ${usuarioId}::uuid)`;
+  const marcados = and(doNegocio, eq(schema.agendamento.peloDono, false), gt(schema.agendamento.criadoEm, vistasEm));
+  const cancelados = and(doNegocio, gt(schema.agendamento.canceladoPeloClienteEm, vistasEm));
   const [novos, desistencias, [{ total }]] = await Promise.all([
     base().where(marcados).orderBy(desc(schema.agendamento.criadoEm)).limit(LIMITE),
     base().where(cancelados).orderBy(desc(schema.agendamento.canceladoPeloClienteEm)).limit(LIMITE),
