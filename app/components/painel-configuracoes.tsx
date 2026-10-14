@@ -69,7 +69,7 @@ export function PainelConfiguracoes({ dados, email, acoes, aoSair, links, avisos
         <Senha dados={dados} email={email} ocupado={ocupado} executar={executar} acoes={acoes} aoAvisar={setAviso} />
       </div>
     </main>
-    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.8.0</span></footer>
+    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.9.0</span></footer>
   </div>;
 }
 

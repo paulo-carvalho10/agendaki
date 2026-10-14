@@ -8,7 +8,7 @@ import { normalizarNome, normalizarTelefone } from '../agenda/pedido-reserva.js'
 type Banco = PostgresJsDatabase<typeof schema>;
 
 /** Endereços que já são páginas do sistema e não podem virar nome de negócio. */
-export const SLUGS_RESERVADOS = ['painel', 'entrar', 'sair', 'cancelar', 'redefinir', 'api', 'admin', 'agendaki', 'favicon', 'robots', 'sitemap', 'manifest', 'sw', 'icones'] as const;
+export const SLUGS_RESERVADOS = ['painel', 'entrar', 'sair', 'cancelar', 'redefinir', 'esqueci', 'api', 'admin', 'agendaki', 'favicon', 'robots', 'sitemap', 'manifest', 'sw', 'icones'] as const;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export { SENHA_MINIMA };

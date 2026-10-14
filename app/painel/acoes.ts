@@ -4,7 +4,9 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { bancoServidor } from '../../src/db/server.js';
 import { COOKIE_SESSAO, entrar, sair } from '../../src/auth/sessao.js';
-import { redefinirSenha, trocarSenha } from '../../src/auth/senha.js';
+import { enviarLinkPorEmail, redefinirSenha, trocarSenha } from '../../src/auth/senha.js';
+import { enderecoDoSite, enviadorDeEmail } from '../../src/auth/email.js';
+import { after } from 'next/server';
 import { marcarNovidadesVistas } from '../../src/painel/novidades.js';
 import { removerInscricao, salvarInscricao, testarAparelho, type InscricaoDoNavegador } from '../../src/avisos/push.js';
 import { enviadorDePush } from '../../src/avisos/web-push.js';
@@ -162,4 +164,20 @@ export async function redefinirSenhaAcao(token: string, _anterior: EstadoRedefin
   if (!resultado.ok) return { erro: resultado.mensagem };
   (await cookies()).delete(COOKIE_SESSAO);
   redirect('/entrar?senha=ok');
+}
+
+export type EstadoEsqueci = { email: string | null; erro: string | null };
+
+/**
+ * Tela "Esqueci minha senha". O envio acontece depois da resposta, e a
+ * resposta é a mesma para qualquer email: nem o texto nem o tempo de resposta
+ * dizem se aquele email tem acesso.
+ */
+export async function pedirLinkAcao(_anterior: EstadoEsqueci, formulario: FormData): Promise<EstadoEsqueci> {
+  const email = String(formulario.get('email') ?? '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) return { email: null, erro: 'Confira o email.' };
+  const enviar = enviadorDeEmail();
+  const site = enderecoDoSite();
+  if (enviar && site) after(() => enviarLinkPorEmail(bancoServidor(), email, site, enviar).then(() => undefined).catch((erro) => console.error('Email de redefinição não enviado:', erro)));
+  return { email, erro: null };
 }

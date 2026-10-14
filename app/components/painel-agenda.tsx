@@ -140,7 +140,7 @@ export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links, n
           aoBloquear={(pedido) => executar(() => acoes.bloquear(pedido), 'Horário bloqueado.')} />
       </aside>
     </main>
-    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.8.0</span></footer>
+    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.9.0</span></footer>
   </div>;
 }
 

@@ -58,7 +58,8 @@ try {
   console.log(`Banco desta execução: DATABASE_URL=${url}`);
   child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', porta], {
     stdio: 'inherit', windowsHide: true,
-    env: { ...chavesDeAviso, ...process.env, DATABASE_URL: url, NEXT_TELEMETRY_DISABLED: '1' },
+    // SITE_URL monta o link do email de "Esqueci minha senha"; o SMTP vem do ambiente, se houver.
+    env: { ...chavesDeAviso, SITE_URL: `http://127.0.0.1:${porta}`, ...process.env, DATABASE_URL: url, NEXT_TELEMETRY_DISABLED: '1' },
   });
   await new Promise<void>((ok, fail) => { child!.once('exit', () => ok()); child!.once('error', fail); });
 } finally { await encerrar(); }

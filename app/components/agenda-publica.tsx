@@ -155,7 +155,7 @@ export function AgendaPublica({ dados, homeHref = '/', aoReservar, rotaCancelame
         <div className="atualizacao"><span>Consultado às {hora(dados.atualizadoEm)}</span><button onClick={() => window.location.reload()}>Consultar novamente <span aria-hidden="true">↻</span></button></div>
       </div>}
     </main>
-    <footer><span>Seu horário. Sem complicação.</span><span>Feito com <b>agendaki</b> · v0.8.0</span></footer>
+    <footer><span>Seu horário. Sem complicação.</span><span>Feito com <b>agendaki</b> · v0.9.0</span></footer>
   </div>;
 }
 

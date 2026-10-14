@@ -14,13 +14,14 @@ fictícia: na demonstração online a reserva é simulada e nada é enviado.
 Agendamento online para pequenos negócios, com motor de disponibilidade e
 proteção contra conflitos no PostgreSQL.
 
-**Versão 0.8.0 · em desenvolvimento.** O cliente escolhe serviço, profissional
+**Versão 0.9.0 · em desenvolvimento.** O cliente escolhe serviço, profissional
 (quando há mais de um), data e horário, confirma com nome e WhatsApp, e recebe
 um link pessoal para cancelar. O dono entra no painel para ver a agenda do dia,
 de todos ou de um profissional, marcar quem veio ou faltou, enviar lembretes,
 agendar quem ligou, bloquear horários e configurar serviços, profissionais,
 expediente e dados do negócio. Ele é avisado no celular quando um cliente marca
-ou cancela, e troca a própria senha.
+ou cancela, troca a própria senha e, se esquecer, recebe um link por email
+para criar outra.
 A demonstração no GitHub Pages, com a página do cliente e o painel do dono, usa os
 mesmos componentes React e o mesmo motor de disponibilidade, com dados fictícios
 renovados a cada visita e sem servidor. A versão Next.js com PostgreSQL, que
@@ -86,8 +87,9 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 - Aviso ao dono quando um cliente marca ou cancela: notificação no celular ou
   no computador (Web Push), mesmo com o painel fechado, e um quadro de
   novidades no painel, que se atualiza sozinho enquanto fica aberto.
-- Troca de senha pelo painel e link de redefinição de uso único para quem
-  esqueceu (`pnpm negocio:link-senha`).
+- Troca de senha pelo painel e "Esqueci minha senha" na tela de entrada, com
+  link de uso único enviado por email. Sem email configurado, o suporte gera o
+  link (`pnpm negocio:link-senha`).
 - Cadastro de um negócio novo pela linha de comando (`pnpm negocio:criar`).
 - Demonstração estática do painel, com as mesmas telas e regras, em memória.
 
@@ -171,7 +173,9 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `app/components/painel-configuracoes.tsx` | Interface das configurações |
 | `app/components/painel-cabecalho.tsx` | Topo e abas comuns às telas do painel |
 | `drizzle/0004_senha_e_avisos.sql` | Links de redefinição, aparelhos com aviso e origem de cada agendamento |
-| `src/auth/senha.ts` | Troca de senha pelo dono e link de redefinição |
+| `src/auth/senha.ts` | Troca de senha pelo dono, link de redefinição e email de "Esqueci minha senha" |
+| `src/auth/email.ts` | Envio por SMTP e endereço público do site para os links |
+| `app/esqueci/page.tsx` | Tela "Esqueci minha senha" |
 | `app/redefinir/[token]/page.tsx` | Página do link de redefinição |
 | `scripts/link-senha.ts` | Linha de comando que gera o link |
 | `src/painel/novidades.ts` | O que os clientes marcaram e cancelaram desde a última conferida |
@@ -344,15 +348,24 @@ cada profissional não fazem parte desta etapa.
 (12 caracteres ou mais). As sessões dos outros aparelhos são encerradas; a do
 aparelho em uso continua. A senha da demonstração não muda por aqui.
 
-**Esqueci a senha.** Não há envio de email. Quem dá suporte confirma que está
-falando com o dono e gera um link:
+**Esqueci a senha.** Na tela de entrada, "Esqueci minha senha" leva a
+`/esqueci`: o dono digita o email e recebe um link para escolher a senha nova.
+A resposta da tela é a mesma para qualquer email, e o envio acontece depois da
+resposta, para nem o texto nem o tempo revelarem quem tem acesso. Pedidos
+seguidos mandam no máximo um email a cada 2 minutos. O link do email é montado
+com `SITE_URL` (na Vercel, o domínio de produção), nunca com o cabeçalho Host
+do pedido. O envio usa SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+`SMTP_PASS`, `EMAIL_REMETENTE`), então serve qualquer provedor.
+
+Sem email configurado, a tela orienta o dono a pedir o link ao suporte, que
+confirma que está falando com o dono e gera o link:
 
 ```sh
 pnpm negocio:link-senha --email dono@exemplo.com --site https://SEU-ENDERECO
 ```
 
-O link vale 60 minutos e uma vez. Abrindo, o dono escolhe a senha nova, sem
-que o suporte fique sabendo qual é. Todas as sessões são encerradas e um
+Pelos dois caminhos, o link vale 60 minutos e uma vez. Abrindo, o dono escolhe
+a senha nova, sem que ninguém fique sabendo qual é. Todas as sessões são encerradas e um
 bloqueio de login por tentativas é desfeito. O banco guarda só o SHA-256 do
 token; um link novo cancela o anterior. Com `SUPORTE_WHATSAPP` definido, a
 tela de entrada mostra um botão para pedir o link pelo WhatsApp.
@@ -378,7 +391,8 @@ a agenda de novo a cada minuto e na hora em que chega um aviso, sem interromper
 quem está digitando.
 
 **Limites desta versão.** O aviso é uma notificação do navegador, não uma
-mensagem de WhatsApp nem um email. Não há recuperação de senha sem o suporte.
+mensagem de WhatsApp nem um email. A recuperação por email depende de um
+provedor de SMTP configurado no ambiente.
 
 ## Painel do dono
 
@@ -443,12 +457,12 @@ serviços, profissionais e horários em Configurações. Opcionais: `--slug`,
 
 ## Validação desta etapa
 
-135 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
-pedido e da exibição de preço, 4 do painel de demonstração e 79 de integração
+137 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
+pedido e da exibição de preço, 4 do painel de demonstração e 81 de integração
 com PostgreSQL real (20 das garantias do banco e da página pública, 18 de
 reserva e cancelamento, 16 do login e do painel, 12 do cadastro e das
 configurações, 2 da migração para vários profissionais, 1 da migração dos
-avisos, 10 de senha, novidades e avisos).
+avisos, 12 de senha, novidades e avisos).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -490,6 +504,7 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
 5. ~~Publicação com banco de produção.~~ No ar na Vercel com Neon desde a 0.6.0 (veja "Publicar na Vercel").
 6. ~~Vários profissionais no mesmo negócio.~~ Feito na 0.7.0.
 7. ~~Troca e redefinição de senha; aviso de reserva nova ao dono.~~ Feito na 0.8.0.
+8. ~~"Esqueci minha senha" por email.~~ Feito na 0.9.0.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
 
@@ -509,7 +524,9 @@ demonstração e deve ser trocado antes da primeira venda.
    avisos no celular, gere um par com `pnpm avisos:chaves` e crie
    `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` (o endereço https
    do site). Sem as três, tudo funciona igual, só sem notificação. Trocar o
-   par depois obriga cada dono a ativar os avisos de novo.
+   par depois obriga cada dono a ativar os avisos de novo. Para o "Esqueci minha
+   senha" por email, crie também `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+   `SMTP_PASS` e `EMAIL_REMETENTE`.
 4. Publique. O build roda `scripts/vercel-migrar.ts` antes do `next build`, e
    as migrações só são aplicadas quando `VERCEL_ENV` é `production`.
 

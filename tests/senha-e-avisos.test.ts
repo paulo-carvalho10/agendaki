@@ -3,7 +3,8 @@ import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { criarNegocio } from '../src/db/negocios.js';
 import { seedDemo, DEMO_EMAIL, DEMO_ID } from '../src/db/seed.js';
 import { BLOQUEIO_MIN, MAXIMO_FALHAS, contarSessoes, entrar, obterSessao } from '../src/auth/sessao.js';
-import { VALIDADE_REDEFINICAO_MIN, criarLinkRedefinicao, obterRedefinicao, redefinirSenha, trocarSenha } from '../src/auth/senha.js';
+import { INTERVALO_ENTRE_PEDIDOS_MIN, VALIDADE_REDEFINICAO_MIN, criarLinkRedefinicao, enviarLinkPorEmail, mensagemDeRedefinicao, obterRedefinicao, redefinirSenha, trocarSenha,
+  type MensagemEmail } from '../src/auth/senha.js';
 import { salvarProfissional, salvarServico } from '../src/painel/configuracao.js';
 import { agendarPeloDono, mudarStatus } from '../src/painel/acoes.js';
 import { marcarNovidadesVistas, obterNovidades } from '../src/painel/novidades.js';
@@ -272,4 +273,47 @@ test('renovar a demonstração mantém o dono, a sessão e os aparelhos com avis
   expect((await entrar(banco.db, DEMO_EMAIL, 'outra-senha-de-teste')).ok).toBe(true);
   // Os clientes de exemplo não aparecem como novidade.
   expect(await obterNovidades(banco.db, antes.id)).toEqual({ total: 0, itens: [] });
+});
+
+// ---------- Esqueci minha senha, por email ----------
+
+test('"esqueci minha senha" manda o link só para o dono cadastrado, sem revelar quem tem acesso', async () => {
+  const caixa: MensagemEmail[] = [];
+  const enviar = async (m: MensagemEmail) => { caixa.push(m); };
+  const pedir = (email: string, agora = AGORA) => enviarLinkPorEmail(banco.db, email, 'https://agendaki.example/', enviar, agora);
+
+  expect(await pedir(`  ${meu.email.toUpperCase()} `)).toBe('enviado');
+  expect(caixa).toHaveLength(1);
+  expect(caixa[0]).toMatchObject({ para: meu.email, assunto: 'Sua senha nova do Agendaki' });
+  expect(caixa[0].texto).toContain('Barbearia Teste');
+  const link = caixa[0].texto.match(/https:\/\/agendaki\.example\/redefinir\/([A-Za-z0-9_-]{43})/);
+  expect(link).not.toBeNull();
+  expect(caixa[0].html).toContain(link![0]);
+  // O link do email funciona como o do suporte.
+  expect(await obterRedefinicao(banco.db, link![1], minutos(1))).toMatchObject({ email: meu.email });
+
+  // Pedidos repetidos em sequência não lotam a caixa do dono; depois do intervalo, sai um link novo e o anterior para de valer.
+  expect(await pedir(meu.email, minutos(1))).toBe('ignorado');
+  expect(await pedir(meu.email, minutos(INTERVALO_ENTRE_PEDIDOS_MIN + 1))).toBe('enviado');
+  expect(caixa).toHaveLength(2);
+  expect(await obterRedefinicao(banco.db, link![1], minutos(INTERVALO_ENTRE_PEDIDOS_MIN + 1))).toBeNull();
+  const novo = caixa[1].texto.match(/redefinir\/([A-Za-z0-9_-]{43})/)![1];
+  expect(await redefinirSenha(banco.db, novo, NOVA, minutos(INTERVALO_ENTRE_PEDIDOS_MIN + 2))).toEqual({ ok: true });
+  expect((await entrar(banco.db, meu.email, NOVA, minutos(INTERVALO_ENTRE_PEDIDOS_MIN + 3))).ok).toBe(true);
+  // Usado o link, um pedido novo volta a valer na hora.
+  expect(await pedir(meu.email, minutos(INTERVALO_ENTRE_PEDIDOS_MIN + 4))).toBe('enviado');
+
+  // Email desconhecido, vazio ou da demonstração: nada sai.
+  await seedDemo(banco.db, 'senha-apenas-de-teste');
+  for (const email of ['ninguem@teste.example', '', DEMO_EMAIL, 'x'.repeat(201), undefined as never]) expect(await pedir(email)).toBe('ignorado');
+  expect(caixa).toHaveLength(3);
+  expect(caixa.every((m) => m.para === meu.email)).toBe(true);
+});
+
+test('o email de redefinição escapa o nome do negócio no HTML', () => {
+  const m = mensagemDeRedefinicao('dono@teste.example', 'Salão <Ana> & "Cia"', 'https://agendaki.example/redefinir/abc');
+  expect(m.html).toContain('Salão &lt;Ana&gt; &amp; &quot;Cia&quot;');
+  expect(m.html).not.toContain('<Ana>');
+  expect(m.texto).toContain('Salão <Ana> & "Cia"');
+  expect(m.texto).toContain('vale por 1 hora e só uma vez');
 });

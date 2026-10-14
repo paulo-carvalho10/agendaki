@@ -16,8 +16,8 @@ export default async function Pagina({ params }: { params: Promise<{ token: stri
     return <div className="site">{topo}<main className="estado">
       <p className="sobretitulo">LINK SEM VALIDADE</p>
       <h1>Este link não vale mais.</h1>
-      <p className="descricao">O link de redefinição vale por uma hora e só pode ser usado uma vez. Peça um novo a quem cuida do seu Agendaki.</p>
-      <a className="botao" href="/entrar">Ir para a tela de entrada</a>
+      <p className="descricao">O link de redefinição vale por uma hora e só pode ser usado uma vez. Peça um novo em “Esqueci minha senha”, na tela de entrada.</p>
+      <a className="botao" href="/esqueci">Pedir um link novo</a>
     </main></div>;
   }
   const ate = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(pedido.expiraEm);
