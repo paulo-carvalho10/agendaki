@@ -4,6 +4,10 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { bancoServidor } from '../../src/db/server.js';
 import { COOKIE_SESSAO, entrar, sair } from '../../src/auth/sessao.js';
+import { redefinirSenha, trocarSenha } from '../../src/auth/senha.js';
+import { marcarNovidadesVistas } from '../../src/painel/novidades.js';
+import { removerInscricao, salvarInscricao, testarAparelho, type InscricaoDoNavegador } from '../../src/avisos/push.js';
+import { enviadorDePush } from '../../src/avisos/web-push.js';
 import { agendarPeloDono, criarBloqueio, mudarStatus, registrarLembrete, removerBloqueio,
   type PedidoBloqueio, type PedidoDoDono, type ResultadoPainel } from '../../src/painel/acoes.js';
 import type { StatusAgendamento } from '../../src/painel/agenda.js';
@@ -113,4 +117,49 @@ export async function salvarFuncionamentoAcao(dias: DiaAberto[]): Promise<Result
   const resultado = await salvarFuncionamento(bancoServidor(), sessao.negocioId, dias);
   revalidatePath('/painel', 'layout');
   return resultado;
+}
+
+// Novidades e avisos
+
+export async function marcarNovidadesVistasAcao(): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const resultado = await marcarNovidadesVistas(bancoServidor(), sessao.usuarioId);
+  revalidatePath('/painel');
+  return resultado;
+}
+
+export async function ativarAvisosAcao(inscricao: InscricaoDoNavegador): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  return salvarInscricao(bancoServidor(), sessao.usuarioId, inscricao);
+}
+
+export async function desativarAvisosAcao(endpoint: string): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  return removerInscricao(bancoServidor(), sessao.usuarioId, endpoint);
+}
+
+export async function testarAvisoAcao(endpoint: string): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  const enviar = enviadorDePush();
+  if (!enviar) return { ok: false, mensagem: 'Os avisos ainda não foram ligados neste sistema.' };
+  return testarAparelho(bancoServidor(), sessao.usuarioId, endpoint, enviar);
+}
+
+// Senha
+
+export async function trocarSenhaAcao(atual: string, nova: string): Promise<ResultadoPainel> {
+  const sessao = await exigirSessao();
+  return trocarSenha(bancoServidor(), sessao.usuarioId, (await cookies()).get(COOKIE_SESSAO)?.value, atual, nova);
+}
+
+export type EstadoRedefinicao = { erro: string | null };
+
+/** Formulário do link de redefinição. Não exige sessão: quem tem o link válido escolhe a senha nova. */
+export async function redefinirSenhaAcao(token: string, _anterior: EstadoRedefinicao, formulario: FormData): Promise<EstadoRedefinicao> {
+  const nova = String(formulario.get('nova') ?? '');
+  if (nova !== String(formulario.get('repetir') ?? '')) return { erro: 'As duas senhas não são iguais.' };
+  const resultado = await redefinirSenha(bancoServidor(), token, nova);
+  if (!resultado.ok) return { erro: resultado.mensagem };
+  (await cookies()).delete(COOKIE_SESSAO);
+  redirect('/entrar?senha=ok');
 }

@@ -10,6 +10,8 @@ export const COOKIE_SESSAO = 'agendaki_sessao';
 export const DURACAO_SESSAO_DIAS = 30;
 /** Erros seguidos antes de travar o login, e por quanto tempo. */
 export const MAXIMO_FALHAS = 5;
+/** Tamanho mínimo de qualquer senha de dono. */
+export const SENHA_MINIMA = 12;
 export const BLOQUEIO_MIN = 15;
 /** randomBytes(32) em base64url. */
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;

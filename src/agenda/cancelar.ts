@@ -23,6 +23,7 @@ export const limiteCancelamento = (inicio: Date) => new Date(inicio.getTime() - 
 export async function obterAgendamentoPorToken(db: Banco, token: string) {
   if (!TOKEN.test(token)) return null;
   const [linha] = await db.select({
+    negocioId: schema.agendamento.negocioId,
     status: schema.agendamento.status, inicio: schema.agendamento.inicio, fim: schema.agendamento.fim,
     clienteNome: schema.agendamento.clienteNome,
     servicoNome: schema.servico.nome, duracaoMin: schema.servico.duracaoMin, precoCentavos: schema.servico.precoCentavos,
@@ -47,7 +48,8 @@ export async function cancelarPorToken(db: Banco, token: string, agora = new Dat
   if (!TOKEN.test(token)) return { ok: false, motivo: 'inexistente' };
   const hash = hashToken(token);
   const prazo = new Date(agora.getTime() + ANTECEDENCIA_CANCELAMENTO_MIN * 60_000);
-  const cancelados = await db.update(schema.agendamento).set({ status: 'cancelado' })
+  // A data fica registrada para o dono ver, no painel, que foi o cliente quem cancelou.
+  const cancelados = await db.update(schema.agendamento).set({ status: 'cancelado', canceladoPeloClienteEm: agora })
     .where(and(eq(schema.agendamento.tokenCancelamentoHash, hash), eq(schema.agendamento.status, 'confirmado'),
       gte(schema.agendamento.inicio, prazo)))
     .returning({ id: schema.agendamento.id });

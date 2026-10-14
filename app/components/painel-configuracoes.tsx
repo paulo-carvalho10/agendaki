@@ -12,6 +12,7 @@ export type AcoesConfiguracao = {
   salvarProfissional: (dados: DadosProfissional) => Promise<ResultadoPainel>;
   definirProfissionalAtivo: (profissionalId: string, ativo: boolean) => Promise<ResultadoPainel>;
   salvarFuncionamento: (dias: DiaAberto[]) => Promise<ResultadoPainel>;
+  trocarSenha: (atual: string, nova: string) => Promise<ResultadoPainel>;
 };
 type Aviso = { tipo: 'erro' | 'ok'; texto: string } | null;
 
@@ -28,8 +29,10 @@ export function lerPreco(texto: string) {
 }
 const precoTexto = (centavos: number) => (centavos / 100).toFixed(2).replace('.', ',');
 
-export function PainelConfiguracoes({ dados, email, acoes, aoSair, links }: {
+export function PainelConfiguracoes({ dados, email, acoes, aoSair, links, avisos }: {
   dados: Configuracao; email: string; acoes: AcoesConfiguracao; aoSair: () => Promise<void>; links?: LinksPainel;
+  /** Cartão dos avisos no celular, que depende do navegador e é montado pela página. */
+  avisos?: React.ReactNode;
 }) {
   const [aviso, setAviso] = useState<Aviso>(null);
   const [ocupado, iniciar] = useTransition();
@@ -62,9 +65,11 @@ export function PainelConfiguracoes({ dados, email, acoes, aoSair, links }: {
           aoSalvar={(dias) => executar(() => acoes.salvarFuncionamento(dias), 'Horário de funcionamento salvo.')} />
         <Negocio key={`${dados.negocio.nome}|${dados.negocio.telefone}`} dados={dados} ocupado={ocupado}
           aoSalvar={(n) => executar(() => acoes.salvarNegocio(n), 'Dados do negócio salvos.')} />
+        {avisos}
+        <Senha dados={dados} email={email} ocupado={ocupado} executar={executar} acoes={acoes} aoAvisar={setAviso} />
       </div>
     </main>
-    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.7.0</span></footer>
+    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.8.0</span></footer>
   </div>;
 }
 
@@ -215,5 +220,31 @@ function Negocio({ dados, ocupado, aoSalvar }: { dados: Configuracao; ocupado: b
     <p className="consulta">É o link que você divulga no Instagram e no WhatsApp.</p>
     <p className="link-cancelar"><a href={`/${dados.negocio.slug}`} target="_blank" rel="noopener noreferrer">{endereco}</a></p>
     <button className="botao secundario" type="button" onClick={async () => { try { await navigator.clipboard.writeText(endereco); setCopiado(true); } catch { /* o link segue visível */ } }}>{copiado ? 'Link copiado ✓' : 'Copiar link'}</button>
+  </section>;
+}
+
+function Senha({ dados, email, ocupado, executar, acoes, aoAvisar }: {
+  dados: Configuracao; email: string; ocupado: boolean; executar: Executar; acoes: AcoesConfiguracao; aoAvisar: (aviso: Aviso) => void;
+}) {
+  const vazio = { atual: '', nova: '', repetir: '' };
+  const [campos, setCampos] = useState(vazio);
+  const mudar = (campo: keyof typeof campos) => (e: React.ChangeEvent<HTMLInputElement>) => setCampos({ ...campos, [campo]: e.target.value });
+  function enviar(evento: React.FormEvent) {
+    evento.preventDefault();
+    if (campos.nova !== campos.repetir) { aoAvisar({ tipo: 'erro', texto: 'As duas senhas novas não são iguais.' }); return; }
+    executar(() => acoes.trocarSenha(campos.atual, campos.nova), 'Senha alterada. Os outros aparelhos em que você estava logado vão pedir a senha nova.', () => setCampos(vazio));
+  }
+  return <section className="cartao" aria-labelledby="senha-titulo">
+    <h2 id="senha-titulo">Senha de acesso</h2>
+    <p className="consulta">Você entra com {email}. Se esquecer a senha, peça um link de redefinição ao suporte.</p>
+    {dados.negocio.demonstracao ? <p className="consulta">Na demonstração a senha fica fixa.</p> : <form className="formulario" onSubmit={enviar}>
+      {/* Ajuda o gerenciador de senhas do navegador a saber de quem é a senha. */}
+      <input type="text" name="username" autoComplete="username" value={email} readOnly hidden />
+      <label className="campo"><span>Senha atual</span><input type="password" value={campos.atual} onChange={mudar('atual')} autoComplete="current-password" maxLength={200} required /></label>
+      <label className="campo"><span>Senha nova</span><input type="password" value={campos.nova} onChange={mudar('nova')} autoComplete="new-password" minLength={12} maxLength={200} required /></label>
+      <label className="campo"><span>Repita a senha nova</span><input type="password" value={campos.repetir} onChange={mudar('repetir')} autoComplete="new-password" minLength={12} maxLength={200} required /></label>
+      <p className="consulta">Pelo menos 12 caracteres. Uma frase curta funciona bem e é fácil de lembrar.</p>
+      <button className="botao" type="submit" disabled={ocupado}>Trocar senha</button>
+    </form>}
   </section>;
 }

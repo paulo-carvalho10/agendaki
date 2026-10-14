@@ -87,7 +87,7 @@ export async function reservarHorario(db: Banco, pedido: PedidoReserva, agora = 
         const tokenCancelamento = randomBytes(32).toString('base64url');
         await tx.insert(schema.agendamento).values({ negocioId: negocio.id, servicoId: servico.id, profissionalId,
           clienteNome: valido.nome, clienteTelefone: valido.telefone, inicio, fim,
-          tokenCancelamentoHash: hashToken(tokenCancelamento) });
+          tokenCancelamentoHash: hashToken(tokenCancelamento), criadoEm: agora, peloDono });
         return { ok: true as const, tokenCancelamento, inicio: inicio.toISOString(), fim: fim.toISOString(),
           cliente: { nome: valido.nome },
           servico: { nome: servico.nome, duracaoMin: servico.duracaoMin, precoCentavos: servico.precoCentavos },

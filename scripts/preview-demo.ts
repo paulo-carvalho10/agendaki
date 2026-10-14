@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import EmbeddedPostgres from 'embedded-postgres';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import webpush from 'web-push';
 import { conectar } from '../src/db/client.js';
 import { seedDemo, DEMO_EMAIL } from '../src/db/seed.js';
 import { limparBancoTemporario } from './limpar-banco-temporario.js';
@@ -25,6 +26,9 @@ const cluster = new EmbeddedPostgres({
 });
 // Senha só desta execução, para entrar no painel da demonstração local.
 const senhaDemo = process.env.DEMO_OWNER_PASSWORD ?? `demo-${randomBytes(6).toString('hex')}`;
+// Chaves de aviso só desta execução, para testar as notificações sem configurar nada.
+const par = webpush.generateVAPIDKeys();
+const chavesDeAviso = { VAPID_PUBLIC_KEY: par.publicKey, VAPID_PRIVATE_KEY: par.privateKey, VAPID_SUBJECT: 'https://agendaki.example' };
 let child: ReturnType<typeof spawn> | undefined;
 let encerrando = false;
 async function encerrar() {
@@ -50,9 +54,11 @@ try {
   console.log('Barbearia de demonstração pronta. Banco temporário; nenhuma conexão com Neon.');
   console.log(`Página do cliente: http://127.0.0.1:${porta}/barbearia-demo`);
   console.log(`Painel do dono:    http://127.0.0.1:${porta}/entrar  ·  ${DEMO_EMAIL}  ·  senha: ${senhaDemo}`);
+  // Para rodar `pnpm negocio:criar` ou `pnpm negocio:link-senha` neste banco temporário.
+  console.log(`Banco desta execução: DATABASE_URL=${url}`);
   child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', porta], {
     stdio: 'inherit', windowsHide: true,
-    env: { ...process.env, DATABASE_URL: url, NEXT_TELEMETRY_DISABLED: '1' },
+    env: { ...chavesDeAviso, ...process.env, DATABASE_URL: url, NEXT_TELEMETRY_DISABLED: '1' },
   });
   await new Promise<void>((ok, fail) => { child!.once('exit', () => ok()); child!.once('error', fail); });
 } finally { await encerrar(); }

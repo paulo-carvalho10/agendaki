@@ -2,6 +2,7 @@
 import { useState, useTransition } from 'react';
 import type { AgendaDoDia, ItemAgenda, StatusAgendamento } from '../../src/painel/agenda.js';
 import type { PedidoBloqueio, PedidoDoDono, ResultadoPainel } from '../../src/painel/acoes.js';
+import type { Novidades } from '../../src/painel/novidades.js';
 import { formatarTelefone, normalizarTelefone, reais, type ResultadoReserva } from '../../src/agenda/pedido-reserva.js';
 import { CabecalhoPainel, type LinksPainel } from './painel-cabecalho';
 
@@ -21,6 +22,9 @@ type Props = {
   aoMudarDia?: (dia: string) => void;
   /** Endereços das abas; a demonstração estática troca os padrões. */
   links?: LinksPainel;
+  /** O que os clientes marcaram e cancelaram desde a última conferida do dono. */
+  novidades?: Novidades;
+  aoVerNovidades?: () => Promise<ResultadoPainel>;
 };
 
 const rotulos: Record<StatusAgendamento, string> = { confirmado: 'Confirmado', atendido: 'Atendido', faltou: 'Faltou', cancelado: 'Cancelado' };
@@ -28,7 +32,7 @@ function dataTexto(dia: string, opcoes: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('pt-BR', { ...opcoes, timeZone: 'UTC' }).format(new Date(`${dia}T12:00:00Z`));
 }
 
-export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links }: Props) {
+export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links, novidades, aoVerNovidades }: Props) {
   const [aviso, setAviso] = useState<{ tipo: 'erro' | 'ok'; texto: string } | null>(null);
   const [ocupado, iniciar] = useTransition();
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState<string | null>(null);
@@ -38,6 +42,8 @@ export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links }:
   const nomeNegocio = negocio.nome.replace(' — demonstração', '');
   const hora = (iso: string) => new Intl.DateTimeFormat('pt-BR', { timeZone: negocio.fuso, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
   const ehHoje = dados.dia === dados.hoje;
+  /** Dia do calendário, no fuso do negócio, em que um horário acontece. */
+  const diaDe = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: negocio.fuso, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 
   /** Roda uma ação do painel e mostra o resultado; a página recarrega os dados sozinha. */
   function executar(acao: () => Promise<ResultadoPainel>, sucesso?: string) {
@@ -76,6 +82,15 @@ export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links }:
       links={links ?? { inicio: '/painel', agenda: '/painel', configuracoes: '/painel/configuracoes', paginaPublica: `/${negocio.slug}` }} />
     <main className="painel-layout">
       <section className="painel-dia" aria-labelledby="dia-titulo">
+        {novidades && novidades.total > 0 && <div className="novidades" role="region" aria-labelledby="novidades-titulo">
+          <h2 id="novidades-titulo">{novidades.total} {novidades.total === 1 ? 'novidade' : 'novidades'} desde a sua última conferida</h2>
+          <ul>{novidades.itens.map((n) => <li key={`${n.tipo}-${n.agendamentoId}`}>
+            <a {...irPara(diaDe(n.inicio))}><strong>{n.clienteNome} {n.tipo === 'marcou' ? 'marcou' : 'cancelou'}</strong>
+              <span>{n.servicoNome}{dados.profissionais.length > 1 ? ` com ${n.profissionalNome}` : ''} · {dataTexto(diaDe(n.inicio), { weekday: 'short', day: 'numeric', month: 'short' }).replaceAll('.', '')}, às {hora(n.inicio)}</span></a>
+          </li>)}</ul>
+          {novidades.total > novidades.itens.length && <p className="consulta">E mais {novidades.total - novidades.itens.length}.</p>}
+          {aoVerNovidades && <button type="button" className="botao pequeno secundario" disabled={ocupado} onClick={() => executar(aoVerNovidades)}>Marcar como vistas</button>}
+        </div>}
         <div className="dia-navegacao">
           <a className="seta" aria-label="Dia anterior" {...irPara(dados.diaAnterior)}>←</a>
           <div>
@@ -125,7 +140,7 @@ export function PainelAgenda({ dados, email, acoes, aoSair, aoMudarDia, links }:
           aoBloquear={(pedido) => executar(() => acoes.bloquear(pedido), 'Horário bloqueado.')} />
       </aside>
     </main>
-    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.7.0</span></footer>
+    <footer><span>Painel de {nomeNegocio}</span><span>Feito com <b>agendaki</b> · v0.8.0</span></footer>
   </div>;
 }
 

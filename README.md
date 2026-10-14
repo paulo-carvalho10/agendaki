@@ -14,12 +14,13 @@ fictícia: na demonstração online a reserva é simulada e nada é enviado.
 Agendamento online para pequenos negócios, com motor de disponibilidade e
 proteção contra conflitos no PostgreSQL.
 
-**Versão 0.7.0 · em desenvolvimento.** O cliente escolhe serviço, profissional
+**Versão 0.8.0 · em desenvolvimento.** O cliente escolhe serviço, profissional
 (quando há mais de um), data e horário, confirma com nome e WhatsApp, e recebe
 um link pessoal para cancelar. O dono entra no painel para ver a agenda do dia,
 de todos ou de um profissional, marcar quem veio ou faltou, enviar lembretes,
 agendar quem ligou, bloquear horários e configurar serviços, profissionais,
-expediente e dados do negócio.
+expediente e dados do negócio. Ele é avisado no celular quando um cliente marca
+ou cancela, e troca a própria senha.
 A demonstração no GitHub Pages, com a página do cliente e o painel do dono, usa os
 mesmos componentes React e o mesmo motor de disponibilidade, com dados fictícios
 renovados a cada visita e sem servidor. A versão Next.js com PostgreSQL, que
@@ -56,7 +57,7 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 
 ## O que está pronto
 
-- Sete tabelas tipadas no Drizzle, com migrações versionadas.
+- Nove tabelas tipadas no Drizzle, com migrações versionadas.
 - Instantes em `timestamptz`, fuso separado e expediente em hora local.
 - Restrição no PostgreSQL contra sobreposição de reservas do mesmo profissional.
 - Proteção transacional entre reservas e bloqueios, inclusive com concorrência.
@@ -82,6 +83,11 @@ O TypeScript foi fixado na série 5.9 por compatibilidade com a API usada pelo N
 - Vários profissionais no mesmo negócio: cada um com a própria agenda, escolha
   pelo cliente ou "tanto faz", bloqueio de todos ou de um só, filtro no painel e
   cadastro em Configurações. Com um só profissional, as telas ficam como antes.
+- Aviso ao dono quando um cliente marca ou cancela: notificação no celular ou
+  no computador (Web Push), mesmo com o painel fechado, e um quadro de
+  novidades no painel, que se atualiza sozinho enquanto fica aberto.
+- Troca de senha pelo painel e link de redefinição de uso único para quem
+  esqueceu (`pnpm negocio:link-senha`).
 - Cadastro de um negócio novo pela linha de comando (`pnpm negocio:criar`).
 - Demonstração estática do painel, com as mesmas telas e regras, em memória.
 
@@ -164,6 +170,18 @@ scrypt com salt aleatório. A integração com Auth.js será feita na etapa do l
 | `app/painel/configuracoes/page.tsx` | Página de configurações |
 | `app/components/painel-configuracoes.tsx` | Interface das configurações |
 | `app/components/painel-cabecalho.tsx` | Topo e abas comuns às telas do painel |
+| `drizzle/0004_senha_e_avisos.sql` | Links de redefinição, aparelhos com aviso e origem de cada agendamento |
+| `src/auth/senha.ts` | Troca de senha pelo dono e link de redefinição |
+| `app/redefinir/[token]/page.tsx` | Página do link de redefinição |
+| `scripts/link-senha.ts` | Linha de comando que gera o link |
+| `src/painel/novidades.ts` | O que os clientes marcaram e cancelaram desde a última conferida |
+| `src/avisos/push.ts` | Aparelhos inscritos, textos dos avisos e envio, sem depender da biblioteca |
+| `src/avisos/web-push.ts` | Envio de verdade pelo protocolo Web Push, com as chaves do ambiente |
+| `src/avisos/reservas.ts` | Liga reserva e cancelamento ao aviso do dono |
+| `public/sw.js` | Recebe o aviso no navegador e abre o painel no dia certo |
+| `app/components/avisos-push.tsx` | Ativar, testar e desativar os avisos em cada aparelho |
+| `app/painel/atualizador.tsx` | Mantém a agenda em dia com o painel aberto |
+| `tests/senha-e-avisos.test.ts` | Senha, link, novidades, aparelhos e avisos |
 | `src/db/negocios.ts` | Cadastro de um negócio com o acesso do dono |
 | `scripts/criar-negocio.ts` | Linha de comando do cadastro |
 | `tests/configuracao.test.ts` | Cadastro, serviços, profissionais, expediente e isolamento entre negócios |
@@ -319,6 +337,48 @@ seguem o horário de funcionamento do negócio; a folga de um deles é um
 bloqueio. Serviços por profissional, expediente individual e um login para
 cada profissional não fazem parte desta etapa.
 
+## Senha e avisos ao dono
+
+**Trocar a senha.** Em Configurações, o dono informa a senha atual e a nova
+(12 caracteres ou mais). As sessões dos outros aparelhos são encerradas; a do
+aparelho em uso continua. A senha da demonstração não muda por aqui.
+
+**Esqueci a senha.** Não há envio de email. Quem dá suporte confirma que está
+falando com o dono e gera um link:
+
+```sh
+pnpm negocio:link-senha --email dono@exemplo.com --site https://SEU-ENDERECO
+```
+
+O link vale 60 minutos e uma vez. Abrindo, o dono escolhe a senha nova, sem
+que o suporte fique sabendo qual é. Todas as sessões são encerradas e um
+bloqueio de login por tentativas é desfeito. O banco guarda só o SHA-256 do
+token; um link novo cancela o anterior. Com `SUPORTE_WHATSAPP` definido, a
+tela de entrada mostra um botão para pedir o link pelo WhatsApp.
+
+**Aviso de reserva nova.** Em Configurações, o dono toca em "Ativar avisos
+neste aparelho" em cada celular ou computador. A partir daí chega uma
+notificação quando um cliente marca ou cancela, mesmo com o painel fechado. O
+texto traz nome, serviço, profissional (quando há mais de um), dia e hora, sem
+telefone, porque aparece na tela de bloqueio. O toque abre a agenda naquele
+dia. O que o próprio dono marca ou cancela no painel não gera aviso.
+
+O envio acontece depois da resposta ao cliente (`after` do Next.js): a reserva
+nunca espera o aviso, e uma falha de entrega não a desfaz. O servidor só envia
+para os serviços de notificação dos navegadores (Google, Apple, Mozilla e
+Microsoft), e apaga a inscrição quando o serviço responde que ela não existe
+mais. No iPhone os avisos exigem o Agendaki na tela de início; a tela explica
+o passo. Em janela anônima eles não funcionam.
+
+**Novidades no painel.** Para quem não ativou os avisos, ou quer conferir
+depois: o painel lista o que os clientes marcaram e cancelaram desde a última
+conferida, com a contagem também no título da aba. Aberto no balcão, ele busca
+a agenda de novo a cada minuto e na hora em que chega um aviso, sem interromper
+quem está digitando.
+
+**Limites desta versão.** O aviso é uma notificação do navegador, não uma
+mensagem de WhatsApp nem um email. Não há recuperação de senha sem o suporte.
+
 ## Painel do dono
 
 **Login sem biblioteca de autenticação.** O plano original citava Auth.js. Para
@@ -382,11 +442,12 @@ serviços, profissionais e horários em Configurações. Opcionais: `--slug`,
 
 ## Validação desta etapa
 
-124 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
-pedido e da exibição de preço, 4 do painel de demonstração e 68 de integração
+134 testes: 43 do motor, 2 dos dados de demonstração, 7 da validação do
+pedido e da exibição de preço, 4 do painel de demonstração e 78 de integração
 com PostgreSQL real (20 das garantias do banco e da página pública, 18 de
 reserva e cancelamento, 16 do login e do painel, 12 do cadastro e das
-configurações, 2 da migração para vários profissionais).
+configurações, 2 da migração para vários profissionais, 10 de senha,
+novidades e avisos).
 O motor cobre resultados exatos, bloqueios parciais, precisão de microssegundos,
 grade, passado, janela de 14 dias, madrugada, faixas unidas, horário de verão,
 fuso com offset fracionário, imutabilidade e rejeição de entradas inválidas.
@@ -427,6 +488,7 @@ consultar disponibilidade e selecionar um horário; nenhuma delas confirma reser
    Feito na 0.6.0.
 5. ~~Publicação com banco de produção.~~ No ar na Vercel com Neon desde a 0.6.0 (veja "Publicar na Vercel").
 6. ~~Vários profissionais no mesmo negócio.~~ Feito na 0.7.0.
+7. ~~Troca e redefinição de senha; aviso de reserva nova ao dono.~~ Feito na 0.8.0.
 
 Funcionalidades fora do MVP estão registradas em `V2.md`.
 
@@ -442,7 +504,11 @@ demonstração e deve ser trocado antes da primeira venda.
    Paulo. A integração cria `DATABASE_URL` (com pool, usada pela aplicação) e
    `DATABASE_URL_UNPOOLED` (direta, usada pelas migrações).
 3. Crie duas variáveis de ambiente de produção: `DEMO_OWNER_PASSWORD`, com pelo
-   menos 12 caracteres, e `CRON_SECRET`, um valor aleatório longo.
+   menos 12 caracteres, e `CRON_SECRET`, um valor aleatório longo. Para os
+   avisos no celular, gere um par com `pnpm avisos:chaves` e crie
+   `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` (o endereço https
+   do site). Sem as três, tudo funciona igual, só sem notificação. Trocar o
+   par depois obriga cada dono a ativar os avisos de novo.
 4. Publique. O build roda `scripts/vercel-migrar.ts` antes do `next build`, e
    as migrações só são aplicadas quando `VERCEL_ENV` é `production`.
 
@@ -457,7 +523,8 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://SEU-ENDERECO/api/reiniciar-
 ```
 
 **Negócios de verdade** são criados com `pnpm negocio:criar`, apontando
-`DATABASE_URL` para o banco de produção. A rotina diária não toca neles.
+`DATABASE_URL` para o banco de produção. A rotina diária não toca neles. Na
+demonstração, ela mantém o dono, a sessão e os aparelhos com aviso ativado.
 
 **pnpm.** O campo `packageManager` fixa o pnpm 11, a mesma versão do
 desenvolvimento.

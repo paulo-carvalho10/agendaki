@@ -1,6 +1,6 @@
 {
   "name": "agendaki",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -20,7 +20,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "negocio:criar": "tsx scripts/criar-negocio.ts"
+    "negocio:criar": "tsx scripts/criar-negocio.ts",
+    "negocio:link-senha": "tsx scripts/link-senha.ts",
+    "avisos:chaves": "web-push generate-vapid-keys"
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.5.1",
@@ -32,12 +34,14 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
     "drizzle-kit": "0.31.10",
     "embedded-postgres": "18.4.0-beta.17",
     "esbuild": "0.25.12",

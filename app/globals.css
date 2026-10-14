@@ -115,6 +115,17 @@ select:focus-visible { outline:3px solid #ab3b22; outline-offset:2px; }
 .painel .erro { margin:0 0 16px; }
 .topo-links button { border:1px solid #a5b3b4; background:transparent; border-radius:8px; padding:8px 14px; min-height:40px; color:var(--ink); }
 .painel-layout { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:48px; padding:44px 6% 64px; align-items:start; }
+.novidades { background:#fff7f4; border:1px solid #f3cfc5; border-left:4px solid var(--accent); border-radius:10px; padding:18px 20px; margin-bottom:28px; }
+.novidades h2 { font-size:17px; }
+.novidades ul { list-style:none; padding:0; margin:12px 0 4px; }
+.novidades li { border-top:1px solid #f3dcd5; }
+.novidades li:first-child { border-top:0; }
+.novidades a { display:block; padding:10px 0; min-height:44px; }
+.novidades a:hover strong { text-decoration:underline; text-underline-offset:3px; }
+.novidades strong { display:block; font-size:15px; }
+.novidades span { font-size:14px; color:var(--muted); }
+.novidades .botao { margin-top:10px; }
+.estado-aviso { margin:0; font-weight:600; color:#1d5239; }
 .dia-navegacao { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
 .dia-navegacao h1 { margin:4px 0 0; font-size:34px; }
 .dia-navegacao h1::first-letter { text-transform:uppercase; }

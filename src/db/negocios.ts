@@ -1,17 +1,17 @@
 import { randomBytes } from 'node:crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from './schema.js';
-import { gerarHashSenha } from '../auth/sessao.js';
+import { SENHA_MINIMA, gerarHashSenha } from '../auth/sessao.js';
 import { codigoPostgres } from '../agenda/reservar.js';
 import { normalizarNome, normalizarTelefone } from '../agenda/pedido-reserva.js';
 
 type Banco = PostgresJsDatabase<typeof schema>;
 
 /** Endereços que já são páginas do sistema e não podem virar nome de negócio. */
-export const SLUGS_RESERVADOS = ['painel', 'entrar', 'sair', 'cancelar', 'api', 'admin', 'agendaki', 'favicon', 'robots', 'sitemap'] as const;
+export const SLUGS_RESERVADOS = ['painel', 'entrar', 'sair', 'cancelar', 'redefinir', 'api', 'admin', 'agendaki', 'favicon', 'robots', 'sitemap', 'manifest', 'sw', 'icones'] as const;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export const SENHA_MINIMA = 12;
+export { SENHA_MINIMA };
 
 /** "Salão da Ana & Cia." vira "salao-da-ana-cia". */
 export function gerarSlug(nome: string) {
